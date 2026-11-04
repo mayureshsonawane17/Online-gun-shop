@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Gun Shop — the online armoury</title>
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400;1,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <video id="v" playsinline muted></video>
+  <div id="shade"></div>
+  <canvas id="c"></canvas>
+
+  <header>
+    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="#fff" stroke-width="3">
+      <circle cx="20" cy="20" r="14"/>
+      <path d="M20 2v10M20 28v10M2 20h10M28 20h10" stroke-width="2"/>
+    </svg>
+    <div>
+      <h1>Gun <i>Shop</i></h1>
+      <p>The online armoury</p>
+    </div>
+  </header>
+
+  <button id="pick" class="card">
+    <canvas width="192" height="88"></canvas>
+    <span>
+      <span class="lab">Pick your gun</span>
+      <b></b>
+    </span>
+  </button>
+
+  <section id="intro" class="card">
+    <div class="tag">
+      <span class="lab">● Gun Shop</span>
+      <span class="pill18">18+</span>
+    </div>
+    <h2>Handle a gun with your <i>hands.</i></h2>
+    <hr>
+    <ol>
+      <li><span>01</span>Close your fist inside the circle to pick the gun up.</li>
+      <li><span>02</span>Point like a finger gun, raise your thumb, then drop it to fire.</li>
+      <li><span>03</span>Open your palm to put the gun back.</li>
+    </ol>
+    <button class="row" id="pick2">
+      <span><b>Pick your gun</b><small></small></span>
+      <span>↗</span>
+    </button>
+    <button class="go" id="go">Turn on my camera</button>
+    <p class="note">Your camera stays on your device. Nothing is recorded or sent anywhere.</p>
+    <button class="alt" id="mouse">No camera? Try it with your mouse</button>
+  </section>
+
+  <div id="hud" hidden>
+    <div id="lab"></div>
+    <div id="ins"></div>
+    <div id="am"></div>
+    <div id="bar"><i></i></div>
+  </div>
+
+  <div id="drawers" class="card" hidden>
+    <button id="x">×</button>
+    <h2>Pick your <i>gun.</i></h2>
+    <p>Each drawer holds one. Tap to take it out.</p>
+    <div id="grid"></div>
+  </div>
+
+  <div id="fxbar" class="card" hidden>
+    <div class="fx-header">
+      <span class="lab">✦ FX Animations</span>
+      <span id="fx-stats" style="font-size:11px;color:#777"></span>
+    </div>
+    <div class="fx-row">
+      <label>Muzzle Flash</label>
+      <div class="fx-select-wrap">
+        <select id="fx-flash">
+          <option value="auto">Auto (matched to gun)</option>
+          <option value="fireball">Fireball Blast</option>
+          <option value="spiky">Spiky Starburst</option>
+          <option value="cone">Flame Cone</option>
+        </select>
+      </div>
+    </div>
+    <div class="fx-row">
+      <label>Smoke Effect</label>
+      <div class="fx-select-wrap">
+        <select id="fx-smoke">
+          <option value="full">Realistic (Puffs + Rings + Wisps)</option>
+          <option value="heavy">Heavy Gunshot Smoke</option>
+          <option value="wisps">Barrel Wisps Only</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <nav id="pills">
+    <button class="pill" id="sw">switch gun</button>
+    <button class="pill" id="fire-btn">💥 fire</button>
+    <button class="pill" id="rs">reset</button>
+  </nav>
+
+  <div id="foot">
+    18+ · A simulation. Nothing real is fired.<br>
+    Space / Click to fire · F flash · S smoke · ← → switch gun
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
