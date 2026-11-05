@@ -4,8 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Gun Shop — the online armoury</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>">
   <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400;1,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="./style.css">
 </head>
 <body>
   <video id="v" playsinline muted></video>
@@ -27,7 +28,7 @@
     <canvas width="192" height="88"></canvas>
     <span>
       <span class="lab">Pick your gun</span>
-      <b></b>
+      <b>Glock 17 <i>Pistol</i></b>
     </span>
   </button>
 
@@ -40,11 +41,11 @@
     <hr>
     <ol>
       <li><span>01</span>Close your fist inside the circle to pick the gun up.</li>
-      <li><span>02</span>Point like a finger gun, raise your thumb, then drop it to fire.</li>
+      <li><span>02</span>Point like a finger gun, drop your thumb or curl index to fire.</li>
       <li><span>03</span>Open your palm to put the gun back.</li>
     </ol>
     <button class="row" id="pick2">
-      <span><b>Pick your gun</b><small></small></span>
+      <span><b>Pick your gun</b><small>Glock 17 Pistol selected</small></span>
       <span>↗</span>
     </button>
     <button class="go" id="go">Turn on my camera</button>
@@ -53,9 +54,9 @@
   </section>
 
   <div id="hud" hidden>
-    <div id="lab"></div>
-    <div id="ins"></div>
-    <div id="am"></div>
+    <div id="lab">Step 1 of 3 · resting</div>
+    <div id="ins">Close your fist inside the circle to pick the gun up</div>
+    <div id="am">15 / 15 rounds · Glock 17 · semi auto</div>
     <div id="bar"><i></i></div>
   </div>
 
@@ -66,45 +67,20 @@
     <div id="grid"></div>
   </div>
 
-  <div id="fxbar" class="card" hidden>
-    <div class="fx-header">
-      <span class="lab">✦ FX Animations</span>
-      <span id="fx-stats" style="font-size:11px;color:#777"></span>
-    </div>
-    <div class="fx-row">
-      <label>Muzzle Flash</label>
-      <div class="fx-select-wrap">
-        <select id="fx-flash">
-          <option value="auto">Auto (matched to gun)</option>
-          <option value="fireball">Fireball Blast</option>
-          <option value="spiky">Spiky Starburst</option>
-          <option value="cone">Flame Cone</option>
-        </select>
-      </div>
-    </div>
-    <div class="fx-row">
-      <label>Smoke Effect</label>
-      <div class="fx-select-wrap">
-        <select id="fx-smoke">
-          <option value="full">Realistic (Puffs + Rings + Wisps)</option>
-          <option value="heavy">Heavy Gunshot Smoke</option>
-          <option value="wisps">Barrel Wisps Only</option>
-        </select>
-      </div>
-    </div>
-  </div>
+  <div id="calib-toast">Starting calibration…</div>
 
   <nav id="pills">
     <button class="pill" id="sw">switch gun</button>
+    <button class="pill" id="recal-btn">recalibrate</button>
     <button class="pill" id="fire-btn">💥 fire</button>
     <button class="pill" id="rs">reset</button>
   </nav>
 
   <div id="foot">
     18+ · A simulation. Nothing real is fired.<br>
-    Space / Click to fire · F flash · S smoke · ← → switch gun
+    Gesture fire · D debug overlay · ← → switch gun
   </div>
 
-  <script src="app.js"></script>
+  <script type="module" src="./src/main.js"></script>
 </body>
 </html>
