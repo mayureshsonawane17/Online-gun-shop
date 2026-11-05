@@ -29,6 +29,11 @@ class TrackedHandState {
     // Dead-zone thresholds against micro-jitter
     this.deadZonePos = 0.0022; // 2.2 mm
     this.deadZoneAngle = 0.012; // ~0.69 degrees
+
+    // Aim latch ring buffer (last 250ms)
+    this.aimRingBuffer = [];
+    this.lastGoodAim = null;
+    this.lastGoodAimTime = 0;
   }
 
   reset() {
@@ -36,6 +41,26 @@ class TrackedHandState {
     this.fwdFilter.reset();
     this.upFilter.reset();
     this.prevWrist = { x: -1, y: -1 };
+    this.aimRingBuffer = [];
+    this.lastGoodAim = null;
+    this.lastGoodAimTime = 0;
+  }
+
+  getLatchedAim(timestamp, offsetMs = 100) {
+    if (this.aimRingBuffer.length === 0) {
+      return { quat: this.smoothQuat.clone(), fwd: new THREE.Vector3(0, 0, 1), pos: this.smoothPos.clone() };
+    }
+    const targetTime = timestamp - offsetMs;
+    let closest = this.aimRingBuffer[0];
+    let minDiff = Math.abs(closest.time - targetTime);
+    for (let i = 1; i < this.aimRingBuffer.length; i++) {
+      const diff = Math.abs(this.aimRingBuffer[i].time - targetTime);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closest = this.aimRingBuffer[i];
+      }
+    }
+    return closest;
   }
 }
 
@@ -108,6 +133,14 @@ export class HandTracker {
     return this.slots[0].gestureDetector;
   }
 
+  getLatchedAim(timestamp = performance.now(), offsetMs = 100) {
+    if (this.triggerHandId) {
+      const s = this.slots.find(sl => sl.id === this.triggerHandId);
+      if (s) return s.getLatchedAim(timestamp, offsetMs);
+    }
+    return this.slots[0].getLatchedAim(timestamp, offsetMs);
+  }
+
   update(timestamp = performance.now()) {
     if (!this.isReady || !this.landmarker || this.video.readyState < 2) {
       return null;
@@ -168,15 +201,61 @@ export class HandTracker {
       const visibleHeight = 2 * Math.tan(vFOV / 2) * Math.abs(targetZ);
       const visibleWidth = visibleHeight * this.camera.aspect;
 
-      const rawX = (screenX * visibleWidth) / 2;
-      const rawY = (screenY * visibleHeight) / 2;
-      const rawZ = targetZ;
+      // 3. 3D Coordinates of Key Landmarks in frustum space
+      const getLandmarkPos = (k) => {
+        const sx = (1 - lm[k].x) * 2 - 1;
+        const sy = 1 - lm[k].y * 2;
+        const sz = targetZ + (wlm ? -wlm[k].z : 0) * 0.9;
+        return new THREE.Vector3((sx * visibleWidth) / 2, (sy * visibleHeight) / 2, sz);
+      };
 
-      // One Euro Filter smoothing
-      const [fx, fy, fz] = slot.posFilter.filter(rawX, rawY, rawZ, timestamp);
+      const p0 = getLandmarkPos(0);
+      const p2 = getLandmarkPos(2);
+      const p4 = getLandmarkPos(4);
+      const p5 = getLandmarkPos(5);
+      const p8 = getLandmarkPos(8);
+      const p9 = getLandmarkPos(9);
+      const p12 = getLandmarkPos(12);
+      const p17 = getLandmarkPos(17);
+
+      let targetPos;
+      let rawFwd;
+      let rawThumbUp;
+
+      if (gestures && gestures.isTwoFingerGun) {
+        // TWO-FINGER GUN POSE:
+        // Barrel direction is the normalized average of index (base 5 to tip 8) and middle (base 9 to tip 12)
+        const vIdx = new THREE.Vector3().subVectors(p8, p5).normalize();
+        const vMid = new THREE.Vector3().subVectors(p12, p9).normalize();
+        rawFwd = new THREE.Vector3().addVectors(vIdx, vMid).normalize();
+
+        // Gun's up axis follows the thumb direction (base 2 to tip 4)
+        rawThumbUp = new THREE.Vector3().subVectors(p4, p2).normalize();
+
+        // Position gun along the two fingers: grip at base midpoint (5 & 9)
+        const pGripBase = new THREE.Vector3().addVectors(p5, p9).multiplyScalar(0.5);
+        targetPos = pGripBase;
+      } else {
+        // Gun hangs relaxed in hand
+        const pPalm = new THREE.Vector3(-(1 - lm[0].x), -lm[0].y, (wlm ? -wlm[0].z : 0) * 0.85);
+        const pKnuckles = new THREE.Vector3(-(1 - lm[5].x), -lm[5].y, (wlm ? -wlm[5].z : 0) * 0.85);
+        rawFwd = new THREE.Vector3().subVectors(pKnuckles, pPalm).normalize();
+
+        // Apply natural relaxed downward tilt (~28 degrees)
+        const relaxEuler = new THREE.Euler(0.48, 0, 0);
+        rawFwd.applyEuler(relaxEuler);
+
+        const rawLateral = new THREE.Vector3().subVectors(p17, p5).normalize();
+        let palmNorm = new THREE.Vector3().crossVectors(rawFwd, rawLateral).normalize();
+        if (handedness === 'Left') palmNorm.negate();
+        rawThumbUp = palmNorm;
+
+        targetPos = p0;
+      }
+
+      // One Euro Filter smoothing on position
+      const [fx, fy, fz] = slot.posFilter.filter(targetPos.x, targetPos.y, targetPos.z, timestamp);
       const newPos = new THREE.Vector3(fx, fy, fz);
-
-      // Positional dead zone to eliminate micro-jitter when holding still
       if (slot.smoothPos.lengthSq() > 0.001) {
         if (slot.smoothPos.distanceTo(newPos) > slot.deadZonePos) {
           slot.smoothPos.copy(newPos);
@@ -185,35 +264,25 @@ export class HandTracker {
         slot.smoothPos.copy(newPos);
       }
 
-      // 3. 3D Orientation (forward vector from wrist 0 to index MCP 5; lateral from index MCP 5 to pinky MCP 17)
-      // Damped metric depth to avoid excessive pitch/yaw tilt from depth noise
-      const zScale = 0.85;
-      const p0 = new THREE.Vector3(-(1 - lm[0].x), -lm[0].y, (wlm ? -wlm[0].z : 0) * zScale);
-      const p5 = new THREE.Vector3(-(1 - lm[5].x), -lm[5].y, (wlm ? -wlm[5].z : 0) * zScale);
-      const p17 = new THREE.Vector3(-(1 - lm[17].x), -lm[17].y, (wlm ? -wlm[17].z : 0) * zScale);
-
-      const rawFwd = new THREE.Vector3().subVectors(p5, p0).normalize();
-      const rawLateral = new THREE.Vector3().subVectors(p17, p5).normalize();
-      let rawPalmNormal = new THREE.Vector3().crossVectors(rawFwd, rawLateral).normalize();
-
-      if (handedness === 'Left') {
-        rawPalmNormal.negate();
+      // Construct orthonormal rotation basis with Up axis following the thumb
+      let right = new THREE.Vector3().crossVectors(rawThumbUp, rawFwd).normalize();
+      if (right.lengthSq() < 0.01) {
+        const lateral = new THREE.Vector3().subVectors(p17, p5).normalize();
+        right.crossVectors(lateral, rawFwd).normalize();
       }
+      let finalUp = new THREE.Vector3().crossVectors(rawFwd, right).normalize();
 
-      const rawRight = new THREE.Vector3().crossVectors(rawFwd, rawPalmNormal).normalize();
-      const rawUp = new THREE.Vector3().crossVectors(rawRight, rawFwd).normalize();
-
-      // Filter orientation basis vectors with 1€ filter to completely remove camera twitching
+      // Filter orientation basis vectors through 1€ filter
       const [ffx, ffy, ffz] = slot.fwdFilter.filter(rawFwd.x, rawFwd.y, rawFwd.z, timestamp);
       const fwd = new THREE.Vector3(ffx, ffy, ffz).normalize();
 
-      const [ufx, ufy, ufz] = slot.upFilter.filter(rawUp.x, rawUp.y, rawUp.z, timestamp);
+      const [ufx, ufy, ufz] = slot.upFilter.filter(finalUp.x, finalUp.y, finalUp.z, timestamp);
       const up = new THREE.Vector3(ufx, ufy, ufz).normalize();
 
-      const right = new THREE.Vector3().crossVectors(fwd, up).normalize();
-      const finalUp = new THREE.Vector3().crossVectors(right, fwd).normalize();
+      const finalRight = new THREE.Vector3().crossVectors(up, fwd).normalize();
+      const basisUp = new THREE.Vector3().crossVectors(fwd, finalRight).normalize();
 
-      const rotMatrix = new THREE.Matrix4().makeBasis(right, finalUp, fwd);
+      const rotMatrix = new THREE.Matrix4().makeBasis(finalRight, basisUp, fwd);
       const targetQuat = new THREE.Quaternion().setFromRotationMatrix(rotMatrix);
 
       // Adaptive rotational smoothing: dead zone + responsive slerp
@@ -226,6 +295,24 @@ export class HandTracker {
       } else {
         slot.smoothQuat.copy(targetQuat);
       }
+
+      // Record in aim ring buffer for 100ms latched aim
+      slot.aimRingBuffer.push({
+        time: timestamp,
+        quat: slot.smoothQuat.clone(),
+        fwd: fwd.clone(),
+        pos: slot.smoothPos.clone()
+      });
+      while (slot.aimRingBuffer.length > 0 && timestamp - slot.aimRingBuffer[0].time > 250) {
+        slot.aimRingBuffer.shift();
+      }
+
+      slot.lastGoodAim = {
+        quat: slot.smoothQuat.clone(),
+        fwd: fwd.clone(),
+        pos: slot.smoothPos.clone()
+      };
+      slot.lastGoodAimTime = timestamp;
 
       activeHands.push({
         id: slot.id,

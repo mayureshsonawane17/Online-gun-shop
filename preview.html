@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MagicFX — Real-time VFX Lab</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,sans-serif}*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(ellipse at 50% 45%,#152238 0,#080c16 58%,#05070d 100%);color:#eaf2ff;overflow:hidden}
+#stage{position:fixed;inset:0}canvas{display:block;width:100%;height:100%}
+.panel{position:fixed;z-index:2;left:22px;top:22px;width:min(340px,calc(100vw - 44px));padding:18px;border:1px solid #ffffff20;border-radius:18px;background:#080e1bd9;backdrop-filter:blur(18px);box-shadow:0 20px 70px #0008}
+h1{font-size:17px;letter-spacing:.12em;text-transform:uppercase;margin:0 0 5px}.sub{color:#8da4c7;font-size:12px;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.grid button,.row button{border:1px solid #6c83a644;background:#17243a;color:#eaf2ff;padding:10px 8px;border-radius:10px;cursor:pointer;font-weight:650;transition:.18s}
+button:hover,button.active{background:#24456a;border-color:#78c8ff;box-shadow:0 0 20px #39aaff30}
+label{display:flex;justify-content:space-between;color:#a9bad3;font-size:12px;margin:15px 0 7px}
+input[type=range]{width:100%;accent-color:#72caff}.row{display:flex;gap:8px;margin-top:12px}.row button{flex:1}
+.hint{font-size:11px;line-height:1.6;color:#8498b6;margin-top:14px}.stat{position:fixed;right:20px;top:18px;color:#b8d7ff;background:#07101dcc;border:1px solid #ffffff20;padding:8px 12px;border-radius:9px;font:12px ui-monospace,monospace}
+#crosshair{position:fixed;left:50%;top:50%;width:12px;height:12px;border:1px solid #9bdcff88;border-radius:50%;pointer-events:none;transform:translate(-50%,-50%)}
+@media(max-width:600px){.panel{left:10px;top:10px;padding:13px}.stat{right:10px;top:auto;bottom:12px}}
+</style>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js"}}
+</script>
+</head>
+<body>
+<div id="stage"></div><div id="crosshair"></div>
+<div class="stat" id="stats">FPS -- · Quality 100%</div>
+<section class="panel">
+  <h1>MagicFX / VFX Lab</h1><div class="sub">PROCEDURAL SPELL SYSTEM · THREE.JS R160</div>
+  <div class="grid" id="powers"></div>
+  <label>Power <strong id="powerValue">75%</strong></label><input id="power" type="range" min="0" max="100" value="75">
+  <label>Bloom <strong id="bloomValue">0.85</strong></label><input id="bloom" type="range" min="0" max="2" step=".05" value=".85">
+  <div class="row"><button id="charge">Hold to charge</button><button id="cast">Cast / release</button></div>
+  <div class="hint">Click a power, then click CAST or press its key. Move your mouse to aim. Hold SPACE to charge Energy Wave. Keys: 1–8 select powers, ENTER casts, ESC clears held effects.</div>
+</section>
+<script type="module">
+import * as THREE from "three";
+import {MagicFX} from "./magic-fx.js";
+const stage=document.querySelector("#stage");
+const renderer=new THREE.WebGLRenderer({alpha:true,antialias:true,powerPreference:"high-performance",premultipliedAlpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));renderer.setSize(innerWidth,innerHeight);
+renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.15;
+renderer.setClearColor(0x000000,0);stage.appendChild(renderer.domElement);
+const scene=new THREE.Scene();const camera=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,.1,100);camera.position.set(0,0,13);camera.lookAt(0,0,0);
+scene.add(new THREE.AmbientLight(0x7d9bc7,.55));
+const floor=new THREE.GridHelper(30,30,0x27405c,0x142337);floor.position.y=-3;floor.material.transparent=true;floor.material.opacity=.22;scene.add(floor);
+const fx=new MagicFX({renderer,scene,camera,quality:.9});
+const names=["Energy Wave","Power Blast","Air","Water","Earth","Fire","Lightning","Shield"];
+const types=["energyWave","powerBlast","air","water","earth","fire","lightning","shield"];
+const keys=["1","2","3","4","5","6","7","8"];
+let selected=0,power=.75,charge=null,held=[];
+const powers=document.querySelector("#powers");
+names.forEach((n,i)=>{const b=document.createElement("button");b.textContent=keys[i]+" · "+n;b.onclick=()=>select(i);powers.appendChild(b);});
+function select(i){selected=i;[...powers.children].forEach((b,j)=>b.classList.toggle("active",i===j));}
+select(0);
+const raycaster=new THREE.Raycaster(),mouse=new THREE.Vector2(),plane=new THREE.Plane(new THREE.Vector3(0,0,1),0),aim=new THREE.Vector3();
+function updateAim(e){mouse.x=e.clientX/innerWidth*2-1;mouse.y=-(e.clientY/innerHeight)*2+1;raycaster.setFromCamera(mouse,camera);raycaster.ray.intersectPlane(plane,aim);}
+addEventListener("pointermove",updateAim);
+function origin(){return new THREE.Vector3(0,0,0);}
+function cast(){const o=origin(),d=aim.clone().sub(o).normalize();const target=aim.clone();if(target.length()<1)target.copy(o).addScaledVector(d,8);const h=fx.cast(types[selected],{origin:o,direction:d,target,power,color:new THREE.Color().setHSL((selected*.105+.54)%1,.85,.62)});held.push(h);if(types[selected]==="energyWave"||types[selected]==="shield")window.currentHeld=h;}
+function startCharge(){if(!charge)charge=fx.charge(types[selected],{origin:origin(),power});}
+function releaseCharge(){if(charge){charge.stop();charge=null;}cast();}
+document.querySelector("#cast").onclick=cast;
+document.querySelector("#charge").onpointerdown=e=>{e.preventDefault();startCharge();};
+document.querySelector("#charge").onpointerup=releaseCharge;
+document.querySelector("#power").oninput=e=>{power=+e.target.value/100;document.querySelector("#powerValue").textContent=e.target.value+"%";};
+document.querySelector("#bloom").oninput=e=>{fx.setPostFX({bloom:+e.target.value});document.querySelector("#bloomValue").textContent=(+e.target.value).toFixed(2);};
+addEventListener("keydown",e=>{if(e.repeat)return;if(keys.includes(e.key))select(keys.indexOf(e.key));if(e.key==="Enter")cast();if(e.key===" "){e.preventDefault();startCharge();}if(e.key==="Escape"){held.forEach(h=>h.stop?.());held=[];window.currentHeld=null;}});
+addEventListener("keyup",e=>{if(e.key===" "){releaseCharge();}});
+addEventListener("pointerdown",e=>{if(e.target===renderer.domElement)cast();});
+let last=performance.now(),frames=0,acc=0;
+function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last)/1000,.05);last=now;fx.update(dt);fx.render();frames++;acc+=dt;if(acc>=.5){document.querySelector("#stats").textContent=`FPS ${Math.round(frames/acc)} · Quality ${Math.round(fx.quality*100)}%`;frames=0;acc=0;}}
+requestAnimationFrame(animate);
+addEventListener("resize",()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+addEventListener("beforeunload",()=>fx.dispose());
+</script>
+</body></html>

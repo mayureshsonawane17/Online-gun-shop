@@ -7,7 +7,10 @@
  */
 import * as THREE from 'three';
 window.THREE = THREE;
+import { handToWorld } from './magic/MagicManager.js';
+window.handToWorld = handToWorld;
 import { GUN_LIST } from './models/GunRegistry.js';
+import { POWER_LIST } from './magic/PowerRegistry.js';
 import { GunModelLoader } from './models/GunModelLoader.js';
 import { SceneManager } from './scene/SceneManager.js';
 import { HandTracker } from './tracking/HandTracker.js';
@@ -22,10 +25,12 @@ class GunShopApp {
     this.intro = document.querySelector('#intro');
     this.hud = document.querySelector('#hud');
 
-    // State
+    // Section & Mode State
+    this.section = 'guns'; // 'guns' or 'magic'
     this.mode = 'intro'; // 'intro', 'cam', 'mouse'
     this.sel = 0;
     this.gunList = GUN_LIST;
+    this.powerList = POWER_LIST;
     this.ammo = this.gunList.map(g => g.mag);
     this.held = false;
     this.reloading = false;
@@ -44,6 +49,7 @@ class GunShopApp {
     // Subsystems
     this.audio = new GunAudio();
     this.sceneManager = new SceneManager(this.canvas);
+    this.magicManager = this.sceneManager.magicManager;
     this.modelLoader = new GunModelLoader();
     this.debugOverlay = new DebugOverlay();
     this.handTracker = new HandTracker(this.video, this.sceneManager.camera);
@@ -56,12 +62,15 @@ class GunShopApp {
     // UI Manager
     this.ui = new UIManager(
       this.gunList,
+      this.powerList,
       (idx) => this.selectGun(idx),
-      () => this.fire(performance.now()),
+      (idx) => this.selectPower(idx),
+      () => this.handleAction(),
       () => this.reload(),
       () => this.reset(),
       () => this.startCalibration(),
-      (sens) => this.handTracker.setSensitivity(sens)
+      (sens) => this.handTracker.setSensitivity(sens),
+      (sec) => this.switchSection(sec)
     );
 
     this.setupEventListeners();
@@ -135,11 +144,50 @@ class GunShopApp {
           this.mouse.twoHands = !this.mouse.twoHands;
         }
       } else if (e.key === 'ArrowRight') {
-        this.selectGun((this.sel + 1) % this.gunList.length);
+        if (this.section === 'magic') {
+          this.selectPower((this.magicManager.activePowerIndex + 1) % this.powerList.length);
+        } else {
+          this.selectGun((this.sel + 1) % this.gunList.length);
+        }
       } else if (e.key === 'ArrowLeft') {
-        this.selectGun((this.sel + this.gunList.length - 1) % this.gunList.length);
+        if (this.section === 'magic') {
+          this.selectPower((this.magicManager.activePowerIndex + this.powerList.length - 1) % this.powerList.length);
+        } else {
+          this.selectGun((this.sel + this.gunList.length - 1) % this.gunList.length);
+        }
       }
     });
+  }
+
+  switchSection(section) {
+    this.section = section;
+    this.sceneManager.setSection(section);
+    if (section === 'magic') {
+      this.magicManager.audio.ensureContext();
+      this.selectPower(this.magicManager.activePowerIndex);
+    }
+  }
+
+  selectPower(idx) {
+    const power = this.magicManager.setPower(idx);
+    if (this.ui) {
+      this.ui.updatePowerSelection(idx);
+      this.ui.updateMagicEnergy(this.magicManager.energy, this.magicManager.maxEnergy, power);
+    }
+  }
+
+  handleAction() {
+    if (this.section === 'magic') {
+      const mouseData = {
+        x: this.mouse.x,
+        y: this.mouse.y,
+        isDown: true,
+        justReleased: true
+      };
+      this.magicManager.processMouseFallback(mouseData, 0.05);
+    } else {
+      this.fire(performance.now());
+    }
   }
 
   async selectGun(idx) {
@@ -195,7 +243,7 @@ class GunShopApp {
   }
 
   startCalibration() {
-    this.ui.showToast('Starting 3-second calibration: Hold thumb UP & relaxed…', 3000);
+    this.ui.showToast('Starting 3-second calibration: Hold TWO-FINGER GUN with Thumb UP…', 3000);
     this.handTracker.getGestureDetector().startCalibration(
       (progressMsg) => this.ui.showToast(progressMsg, 2000),
       (completeMsg) => this.ui.showToast(completeMsg, 3500)
@@ -246,8 +294,12 @@ class GunShopApp {
     const panX = this.sceneManager.weaponRoot.position.x;
     this.audio.playShot(gun, panX);
 
+    // Aim latch: use historical aim vector from 100ms earlier if single-handed gun
+    const isSingleHand = gun.hands === 'one' || (gun.hands === 'optional-two' && !this.sceneManager.isSupportAttached);
+    const latchedAim = isSingleHand ? this.handTracker.getLatchedAim(now, 100) : null;
+
     // Trigger visual gunfire effects (flash, tracers, 3D casing, smoke blast, recoil spring)
-    this.sceneManager.triggerFire(gun, isUnsupported);
+    this.sceneManager.triggerFire(gun, isUnsupported, latchedAim);
 
     // Auto reload when empty
     if (this.ammo[this.sel] === 0) {
@@ -280,6 +332,58 @@ class GunShopApp {
     const dt = Math.min((now - this.prevFrameTime) / 1000, 0.05);
     this.prevFrameTime = now;
 
+    // ==========================================
+    // MAGIC SECTION LOOP
+    // ==========================================
+    if (this.section === 'magic') {
+      let trackingData = null;
+      if (this.mode === 'cam') {
+        trackingData = this.handTracker.update(now);
+        if (trackingData && trackingData.primaryHand && trackingData.primaryHand.gestures) {
+          const pG = trackingData.primaryHand.gestures;
+          if (pG.swipeDirection !== 0) {
+            if (pG.swipeDirection > 0) {
+              this.selectPower((this.magicManager.activePowerIndex + 1) % this.powerList.length);
+            } else {
+              this.selectPower((this.magicManager.activePowerIndex + this.powerList.length - 1) % this.powerList.length);
+            }
+          }
+        }
+      }
+
+      const mouseData = {
+        x: this.mouse.x,
+        y: this.mouse.y,
+        isDown: this.mouse.down,
+        justReleased: this.mouse.click
+      };
+      this.mouse.click = false;
+
+      // Update scene & postprocessing effects
+      this.sceneManager.update(dt, trackingData, mouseData);
+
+      // Update Magic UI & Status Chips
+      const activePower = this.magicManager.activePower;
+      this.ui.updateMagicEnergy(this.magicManager.energy, this.magicManager.maxEnergy, activePower);
+      this.ui.updateMagicStatusChips(trackingData, activePower, this.magicManager.energy, this.mode);
+      this.debugOverlay.update(
+        trackingData,
+        this.mode,
+        false,
+        null,
+        'magic',
+        {
+          activePower,
+          energy: this.magicManager.energy,
+          actions: this.magicManager.gestureDetector.currentActions
+        }
+      );
+      return;
+    }
+
+    // ==========================================
+    // GUN SHOP SECTION LOOP
+    // ==========================================
     const gun = this.gunList[this.sel];
     let trackingData = null;
 
@@ -334,23 +438,40 @@ class GunShopApp {
               isGripChanging = (pG && pG.isGripChanging) || (sG && sG.isGripChanging);
               isArmed = (pG && pG.triggerState === 'ARMED') || (sG && sG.triggerState === 'ARMED');
 
-              const isSupportAttached = this.sceneManager.isSupportAttached;
+              this.sceneManager.showAimLaser = this.debugOverlay.visible;
 
-              // Heavy gun requirement check (snipers, LMG, minigun, launcher cannot fire without 2 hands)
-              if (gun.requiresSupport && !isSupportAttached) {
-                if (justFired) {
-                  this.ui.showToast(`Hold foregrip with your second hand to fire ${gun.name}!`, 2200);
-                  this.audio.playMechanical('dryfire');
-                }
-              } else {
-                const isUnsupported = gun.hands === 'two' && !isSupportAttached;
+              const isSupportAttached = this.sceneManager.isSupportAttached;
+              const isSingleHand = gun.hands === 'one' || (gun.hands === 'optional-two' && !isSupportAttached);
+
+              if (isSingleHand) {
+                // SINGLE-HANDED GUN SCHEME (Two-Finger Gun):
+                // Full auto for SMGs while thumb is folded down, semi-auto 1 shot per fold for pistols
                 if (gun.auto) {
                   if (isTriggerDown) {
-                    this.fire(now, isUnsupported);
+                    this.fire(now, false);
                   }
                 } else {
                   if (justFired) {
-                    this.fire(now, isUnsupported);
+                    this.fire(now, false);
+                  }
+                }
+              } else {
+                // TWO-HANDED GUN SCHEME (Rifles, Shotguns, Snipers, LMGs, Launchers):
+                if (gun.requiresSupport && !isSupportAttached) {
+                  if (justFired) {
+                    this.ui.showToast(`Hold foregrip with your second hand to fire ${gun.name}!`, 2200);
+                    this.audio.playMechanical('dryfire');
+                  }
+                } else {
+                  const isUnsupported = gun.hands === 'two' && !isSupportAttached;
+                  if (gun.auto) {
+                    if (isTriggerDown) {
+                      this.fire(now, isUnsupported);
+                    }
+                  } else {
+                    if (justFired) {
+                      this.fire(now, isUnsupported);
+                    }
                   }
                 }
               }
@@ -408,6 +529,7 @@ class GunShopApp {
     }
 
     // 3. Update Scene & Effects
+    this.sceneManager.showAimLaser = this.debugOverlay.visible;
     this.sceneManager.update(dt, trackingData, this.mouse);
 
     // 4. Update UI & Status Chips

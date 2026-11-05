@@ -195,13 +195,17 @@ export class UIManager {
     if (this.intro) this.intro.style.visibility = '';
   }
 
-  selectPower(idx) {
+  updatePowerSelection(idx) {
     this.selectedPowerIndex = idx;
     const power = this.powerList[idx];
-    if (this.pickMagicTitle) {
+    if (this.pickMagicTitle && power) {
       this.pickMagicTitle.innerHTML = `${power.name} <i>${power.badge}</i>`;
     }
     this.updateMagicPreviewCanvas(power);
+  }
+
+  selectPower(idx) {
+    this.updatePowerSelection(idx);
     if (this.onSelectPower) this.onSelectPower(idx);
   }
 
@@ -422,13 +426,13 @@ export class UIManager {
     this.setChip(this.chipHold, isHeld ? 'info' : 'off', isHeld ? 'Holding' : 'Resting');
 
     if (isTriggerDown) {
-      this.setChip(this.chipTrigger, 'active', 'Trigger pressed');
+      this.setChip(this.chipTrigger, 'active', 'Trigger folded');
     } else if (isGripChanging) {
-      this.setChip(this.chipTrigger, 'warn', 'Grip changing');
+      this.setChip(this.chipTrigger, 'warn', 'Grip shifting');
     } else if (isArmed) {
-      this.setChip(this.chipTrigger, 'on', 'Trigger armed');
+      this.setChip(this.chipTrigger, 'on', 'Armed (Ready)');
     } else {
-      this.setChip(this.chipTrigger, 'off', 'Trigger released');
+      this.setChip(this.chipTrigger, 'off', 'Thumb up to arm');
     }
   }
 
@@ -489,7 +493,7 @@ export class UIManager {
 
     this.hudIns.textContent = [
       isCam ? 'Hold a fist for 0.2s near the stand to pick up' : 'Click the stand circle to pick up',
-      isCam ? 'Press thumb down to fire · hold open palm for 0.5s to put back' : 'Click or Space to fire · right-click to put back',
+      isCam ? 'Aim with two-finger gun (index + middle) · fold thumb to fire' : 'Click or Space to fire · right-click to put back',
       isCam ? 'Hold open palm for 0.5s to put gun back' : 'Right-click or Esc to put it back'
     ][step - 1];
 

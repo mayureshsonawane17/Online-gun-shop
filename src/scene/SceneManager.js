@@ -65,6 +65,10 @@ export class SceneManager {
     // 8. Foregrip Support Ring
     this.setupSupportRing();
 
+    // 8b. Subtle Armed Indicator Light on Gun
+    this.setupArmedIndicator();
+    this.showAimLaser = false;
+
     // 9. Visual Effects
     this.muzzleFlash = new MuzzleFlash(this.scene);
     this.gpuSmoke = new GPUSmoke(this.scene, 1000);
@@ -111,6 +115,7 @@ export class SceneManager {
         this.aimLaser.visible = true;
         this.aimDot.visible = true;
       }
+      this.magicManager.cleanupActiveEffects();
       this.magicManager.enabled = false;
     }
   }
@@ -169,6 +174,43 @@ export class SceneManager {
     this.supportRing = new THREE.Mesh(ringGeo, ringMat);
     this.supportRing.visible = false;
     this.weaponRoot.add(this.supportRing);
+  }
+
+  setupArmedIndicator() {
+    const ledGeo = new THREE.SphereGeometry(0.006, 12, 12);
+    const ledMat = new THREE.MeshBasicMaterial({
+      color: 0x3df0a0,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending
+    });
+    this.armedIndicator = new THREE.Mesh(ledGeo, ledMat);
+    this.armedIndicator.position.set(0, 0.045, -0.05);
+    this.armedIndicator.visible = false;
+    this.weaponRoot.add(this.armedIndicator);
+
+    this.armedLight = new THREE.PointLight(0x00ffaa, 0.45, 0.25);
+    this.armedLight.position.set(0, 0.045, -0.05);
+    this.armedLight.visible = false;
+    this.weaponRoot.add(this.armedLight);
+  }
+
+  setArmedIndicatorState(isArmed, isSingleHand) {
+    if (!this.armedIndicator) return;
+    if (this.isGunHeld && isSingleHand) {
+      this.armedIndicator.visible = true;
+      if (isArmed) {
+        this.armedIndicator.material.color.setHex(0x00ffaa); // Vibrant ready green/cyan
+        this.armedLight.visible = true;
+        this.armedLight.intensity = 0.45;
+      } else {
+        this.armedIndicator.material.color.setHex(0x334433); // Dim standby
+        this.armedLight.visible = false;
+      }
+    } else {
+      this.armedIndicator.visible = false;
+      this.armedLight.visible = false;
+    }
   }
 
   setupLighting() {
@@ -261,7 +303,7 @@ export class SceneManager {
     return local;
   }
 
-  triggerFire(gunMeta, isUnsupported = false) {
+  triggerFire(gunMeta, isUnsupported = false, latchedAim = null) {
     if (!this.currentGunGroup) return;
 
     // Physical recoil kick (heavier kick if unsupported two-handed rifle/shotgun)
@@ -279,7 +321,13 @@ export class SceneManager {
       muzzleWorld.z += 0.3;
     }
 
-    const fwdDir = new THREE.Vector3(0, 0, 1).applyQuaternion(this.weaponRoot.quaternion).normalize();
+    // Aim latch: use historical aim vector from 100ms earlier if supplied, eliminating thumb-fold hand twitch
+    let fwdDir;
+    if (latchedAim && latchedAim.fwd) {
+      fwdDir = latchedAim.fwd.clone().normalize();
+    } else {
+      fwdDir = new THREE.Vector3(0, 0, 1).applyQuaternion(this.weaponRoot.quaternion).normalize();
+    }
 
     // 1. Muzzle Flash
     this.muzzleFlash.trigger(muzzleWorld, fwdDir, gunMeta.big ? 1.4 : 1.0);
@@ -379,6 +427,12 @@ export class SceneManager {
             targetQuat.multiply(extraQuat);
           }
         }
+
+        // Update Armed LED Indicator for single-handed firearms
+        const isSingleHandGun = gun.hands === 'one' || (isOptTwoHand && !this.isSupportAttached);
+        const pG = triggerHand.gestures;
+        const isArmed = pG ? pG.isArmed : false;
+        this.setArmedIndicatorState(isArmed, isSingleHandGun);
       } else if (mouseControlData) {
         // Track Mouse fallback in 3D
         const targetZ = -0.85;
@@ -394,7 +448,11 @@ export class SceneManager {
         const pitch = 0.05;
         targetQuat.setFromEuler(new THREE.Euler(pitch, yaw, 0));
 
-        this.isSupportAttached = mouseControlData.twoHands !== false;
+        this.isSupportAttached = (isTwoHandGun || isOptTwoHand) && mouseControlData.twoHands !== false;
+
+        // Update Armed LED Indicator for single-handed firearms in mouse mode
+        const isSingleHandGun = gun.hands === 'one' || (isOptTwoHand && !this.isSupportAttached);
+        this.setArmedIndicatorState(this.isGunHeld, isSingleHandGun);
 
         // If two-handed weapon is unsupported in mouse mode, apply gentle weight droop
         if (isTwoHandGun && !this.isSupportAttached) {
@@ -468,7 +526,12 @@ export class SceneManager {
     }
 
     // 6. Update Aim Laser & Aim Dot
-    if (this.isGunHeld && this.heldLerp > 0.6) {
+    const triggerHand = handTrackingData?.primaryHand || handTrackingData;
+    const isSingleHand = !isTwoHandGun && !this.isSupportAttached;
+    const isArmed = triggerHand?.gestures?.isArmed;
+    const shouldShowLaser = this.showAimLaser || (isSingleHand && isArmed);
+
+    if (this.isGunHeld && this.heldLerp > 0.6 && shouldShowLaser) {
       const muzzleNode = this.currentGunGroup
         ? (this.currentGunGroup.getObjectByName('muzzle') || this.currentGunGroup.userData?.muzzle)
         : null;

@@ -6,8 +6,8 @@
   <title>Gun Shop — the online armoury</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>">
   <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400;1,600&display=swap" rel="stylesheet">
-  <script type="module" crossorigin src="/assets/index-Db4Pw9wn.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-B_scCeI6.css">
+  <script type="module" crossorigin src="/assets/index-C5hF22v-.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-BQsIsRDb.css">
 </head>
 <body>
   <video id="v" playsinline muted></video>
@@ -20,8 +20,12 @@
       <path d="M20 2v10M20 28v10M2 20h10M28 20h10" stroke-width="2"/>
     </svg>
     <div>
-      <h1>Gun <i>Shop</i></h1>
-      <p>The online armoury</p>
+      <h1 id="app-title">Gun <i>Shop</i></h1>
+      <p id="app-subtitle">The online armoury</p>
+    </div>
+    <div id="section-switch-pill" class="pill-switch">
+      <button class="switch-btn active" id="btn-sec-guns">🎯 Guns</button>
+      <button class="switch-btn" id="btn-sec-magic">✨ Magic</button>
     </div>
   </header>
 
@@ -45,6 +49,26 @@
       <b>Glock 17 <i>Pistol</i></b>
     </span>
   </button>
+
+  <button id="pick-magic" class="card" hidden>
+    <canvas id="magic-preview-canvas" width="192" height="88"></canvas>
+    <span>
+      <span class="lab">Pick your power</span>
+      <b id="active-power-title">Energy Wave <i>Beam</i></b>
+    </span>
+  </button>
+
+  <!-- Magic Energy Meter Card -->
+  <div id="magic-energy-card" class="card" hidden>
+    <div class="energy-header">
+      <span class="energy-title">⚡ Mystic Energy</span>
+      <b id="energy-val">100 / 100</b>
+    </div>
+    <div class="energy-bar-track">
+      <div id="energy-bar-fill"></div>
+    </div>
+    <div id="magic-gesture-tip">🙌 Cup hands at hip, thrust forward to fire</div>
+  </div>
 
   <section id="intro" class="card">
     <div class="tag">
@@ -79,6 +103,13 @@
     <h2>Pick your <i>gun.</i></h2>
     <p>Each drawer holds one. Tap to take it out.</p>
     <div id="grid"></div>
+  </div>
+
+  <div id="magic-drawers" class="card" hidden>
+    <button id="magic-x">×</button>
+    <h2>Pick your <i>power.</i></h2>
+    <p>Channel the elements with your hands. Tap a seal to awaken it.</p>
+    <div id="magic-grid"></div>
   </div>
 
   <div id="calib-toast">Starting calibration…</div>

@@ -6,8 +6,17 @@
  */
 import * as THREE from 'three';
 
+// lm = {x,y} normalized landmark (0..1) from MediaPipe, camera = THREE.PerspectiveCamera
+export function handToWorld(lm, camera, depth = 4) {
+  const v = new THREE.Vector3((1 - lm.x) * 2 - 1, -(lm.y * 2 - 1), 0.5); // x mirrored like the webcam
+  v.unproject(camera);
+  const dir = v.sub(camera.position).normalize();
+  return camera.position.clone().add(dir.multiplyScalar(depth));
+}
+
 export class MagicGestureDetector {
-  constructor() {
+  constructor(camera = null) {
+    this.camera = camera;
     // History buffer for motion tracking (positions over last 400ms)
     this.handHistory = new Map(); // handId -> array of { time, pos3D, screenPos, pose }
 
@@ -44,10 +53,11 @@ export class MagicGestureDetector {
       punchDir: new THREE.Vector3(0, 0, -1),
       justEarthSmash: false,
 
-      // Fire & Lightning
+      // Fire & Lightning & Shield
       justFireball: false,
       isFlamethrower: false,
       isLightningSpread: false,
+      justLightningStrike: false,
       isHexShieldActive: false,
       shieldCenter: new THREE.Vector3()
     };
@@ -74,6 +84,7 @@ export class MagicGestureDetector {
     this.currentActions.justEarthPunch = false;
     this.currentActions.justEarthSmash = false;
     this.currentActions.justFireball = false;
+    this.currentActions.justLightningStrike = false;
 
     if (!trackingData || !trackingData.hands || trackingData.hands.length === 0) {
       this.currentActions.isCuppedCharging = false;
@@ -143,10 +154,15 @@ export class MagicGestureDetector {
         this.currentActions.isCuppedCharging = false;
         if (h2) {
           this.currentActions.beamOrigin.copy(handsMidpoint);
-          const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(h1.hand.quaternion);
-          this.currentActions.beamDirection.copy(fwd).normalize();
         } else {
           this.currentActions.beamOrigin.copy(h1.hand.position);
+        }
+
+        if (h1.hand.rawLandmarks && h1.hand.rawLandmarks[12] && h1.hand.rawLandmarks[0] && this.camera) {
+          // direction for a thrust: from wrist to middle fingertip
+          const dir = handToWorld(h1.hand.rawLandmarks[12], this.camera).sub(handToWorld(h1.hand.rawLandmarks[0], this.camera)).normalize();
+          this.currentActions.beamDirection.copy(dir);
+        } else {
           const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(h1.hand.quaternion);
           this.currentActions.beamDirection.copy(fwd).normalize();
         }
@@ -269,15 +285,30 @@ export class MagicGestureDetector {
     }
 
     // ===============================================
-    // POWER 7: LIGHTNING & SHIELD
+    // POWER 7: LIGHTNING
     // ===============================================
     if (activePowerId === 'lightning') {
       const anyFingersSpread = handInfos.some(i => i.pose.isSpread);
       this.currentActions.isLightningSpread = anyFingersSpread;
 
+      for (const info of handInfos) {
+        if ((info.pose.isSpread || info.motion.isThrustForward) && this.debounce('lightning', 220, timestamp)) {
+          this.currentActions.justLightningStrike = true;
+          break;
+        }
+      }
+    }
+
+    // ===============================================
+    // POWER 8: SHIELD
+    // ===============================================
+    if (activePowerId === 'shield') {
       if (bothPalmsForward && handsDistance < 0.45) {
         this.currentActions.isHexShieldActive = true;
         this.currentActions.shieldCenter.copy(handsMidpoint);
+      } else if (h1 && (h1.pose.isOpen || bothPalmsForward)) {
+        this.currentActions.isHexShieldActive = true;
+        this.currentActions.shieldCenter.copy(h1.hand.position);
       } else {
         this.currentActions.isHexShieldActive = false;
       }
@@ -368,3 +399,4 @@ export class MagicGestureDetector {
     return { vel, isThrustForward, isCircling, isChop };
   }
 }
+

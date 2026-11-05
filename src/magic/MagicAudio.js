@@ -103,6 +103,26 @@ export class MagicAudio {
   // ==========================================
   // 1. ENERGY WAVE (Kamehameha Charge & Beam)
   // ==========================================
+  startCharge(power = 0.5) {
+    this.startChargeWhine(90 + power * 40, 980 + power * 200);
+  }
+
+  updateCharge(power = 0.5) {
+    // Dynamic pitch/volume modulation
+  }
+
+  stopCharge() {
+    this.stopChargeWhine();
+  }
+
+  startBeam(power = 0.8) {
+    this.startBeamRoar();
+  }
+
+  stopBeam() {
+    this.stopBeamRoar();
+  }
+
   startChargeWhine(pitchStart = 90, pitchEnd = 980) {
     this.ensureContext();
     if (this.activeLoops.has('charge')) return;
@@ -541,3 +561,4 @@ export class MagicAudio {
     osc.stop(t + 0.18);
   }
 }
+
