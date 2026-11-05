@@ -17,6 +17,8 @@ class TrackedHandState {
   constructor(id) {
     this.id = id;
     this.posFilter = new OneEuroFilter3D({ minCutoff: 1.1, beta: 0.006, dCutoff: 1.0 });
+    this.fwdFilter = new OneEuroFilter3D({ minCutoff: 0.6, beta: 0.003, dCutoff: 1.0 });
+    this.upFilter = new OneEuroFilter3D({ minCutoff: 0.6, beta: 0.003, dCutoff: 1.0 });
     this.smoothPos = new THREE.Vector3();
     this.smoothQuat = new THREE.Quaternion();
     this.gestureDetector = new GestureDetector();
@@ -26,11 +28,13 @@ class TrackedHandState {
 
     // Dead-zone thresholds against micro-jitter
     this.deadZonePos = 0.0022; // 2.2 mm
-    this.deadZoneAngle = 0.015; // ~0.86 degrees
+    this.deadZoneAngle = 0.012; // ~0.69 degrees
   }
 
   reset() {
     this.posFilter.reset();
+    this.fwdFilter.reset();
+    this.upFilter.reset();
     this.prevWrist = { x: -1, y: -1 };
   }
 }
@@ -182,29 +186,42 @@ export class HandTracker {
       }
 
       // 3. 3D Orientation (forward vector from wrist 0 to index MCP 5; lateral from index MCP 5 to pinky MCP 17)
-      const p0 = new THREE.Vector3(-(1 - lm[0].x), -lm[0].y, (wlm ? -wlm[0].z : 0) * 1.5);
-      const p5 = new THREE.Vector3(-(1 - lm[5].x), -lm[5].y, (wlm ? -wlm[5].z : 0) * 1.5);
-      const p17 = new THREE.Vector3(-(1 - lm[17].x), -lm[17].y, (wlm ? -wlm[17].z : 0) * 1.5);
+      // Damped metric depth to avoid excessive pitch/yaw tilt from depth noise
+      const zScale = 0.85;
+      const p0 = new THREE.Vector3(-(1 - lm[0].x), -lm[0].y, (wlm ? -wlm[0].z : 0) * zScale);
+      const p5 = new THREE.Vector3(-(1 - lm[5].x), -lm[5].y, (wlm ? -wlm[5].z : 0) * zScale);
+      const p17 = new THREE.Vector3(-(1 - lm[17].x), -lm[17].y, (wlm ? -wlm[17].z : 0) * zScale);
 
-      const fwd = new THREE.Vector3().subVectors(p5, p0).normalize();
-      const lateral = new THREE.Vector3().subVectors(p17, p5).normalize();
-      const palmNormal = new THREE.Vector3().crossVectors(fwd, lateral).normalize();
+      const rawFwd = new THREE.Vector3().subVectors(p5, p0).normalize();
+      const rawLateral = new THREE.Vector3().subVectors(p17, p5).normalize();
+      let rawPalmNormal = new THREE.Vector3().crossVectors(rawFwd, rawLateral).normalize();
 
       if (handedness === 'Left') {
-        palmNormal.negate();
+        rawPalmNormal.negate();
       }
 
-      const right = new THREE.Vector3().crossVectors(fwd, palmNormal).normalize();
-      const up = new THREE.Vector3().crossVectors(right, fwd).normalize();
+      const rawRight = new THREE.Vector3().crossVectors(rawFwd, rawPalmNormal).normalize();
+      const rawUp = new THREE.Vector3().crossVectors(rawRight, rawFwd).normalize();
 
-      const rotMatrix = new THREE.Matrix4().makeBasis(right, up, fwd);
+      // Filter orientation basis vectors with 1€ filter to completely remove camera twitching
+      const [ffx, ffy, ffz] = slot.fwdFilter.filter(rawFwd.x, rawFwd.y, rawFwd.z, timestamp);
+      const fwd = new THREE.Vector3(ffx, ffy, ffz).normalize();
+
+      const [ufx, ufy, ufz] = slot.upFilter.filter(rawUp.x, rawUp.y, rawUp.z, timestamp);
+      const up = new THREE.Vector3(ufx, ufy, ufz).normalize();
+
+      const right = new THREE.Vector3().crossVectors(fwd, up).normalize();
+      const finalUp = new THREE.Vector3().crossVectors(right, fwd).normalize();
+
+      const rotMatrix = new THREE.Matrix4().makeBasis(right, finalUp, fwd);
       const targetQuat = new THREE.Quaternion().setFromRotationMatrix(rotMatrix);
 
-      // Rotational dead zone against jitter
+      // Adaptive rotational smoothing: dead zone + responsive slerp
       if (slot.smoothQuat.lengthSq() > 0.001) {
         const angDiff = slot.smoothQuat.angleTo(targetQuat);
         if (angDiff > slot.deadZoneAngle) {
-          slot.smoothQuat.slerp(targetQuat, 0.22);
+          const slerpFactor = Math.min(0.40, Math.max(0.12, angDiff * 1.8));
+          slot.smoothQuat.slerp(targetQuat, slerpFactor);
         }
       } else {
         slot.smoothQuat.copy(targetQuat);

@@ -18,6 +18,7 @@ import { GPUSmoke } from '../effects/GPUSmoke.js';
 import { BulletTracers } from '../effects/BulletTracers.js';
 import { BrassCasings } from '../effects/BrassCasings.js';
 import { Sparks } from '../effects/Sparks.js';
+import { MagicManager } from '../magic/MagicManager.js';
 
 export class SceneManager {
   constructor(canvasElement) {
@@ -73,6 +74,10 @@ export class SceneManager {
       if (this.onCasingBounce) this.onCasingBounce();
     });
 
+    // 10. Magic Manager Module
+    this.magicManager = new MagicManager(this.scene, this.camera, this.renderer);
+    this.section = 'guns'; // 'guns' or 'magic'
+
     // Weapon state
     this.currentGunGroup = null;
     this.currentGunMeta = null;
@@ -88,6 +93,26 @@ export class SceneManager {
     this.isSupportAttached = false;
 
     window.addEventListener('resize', () => this.onResize());
+  }
+
+  setSection(section) {
+    this.section = section;
+    if (section === 'magic') {
+      this.turntable.mountNode.visible = false;
+      this.weaponRoot.visible = false;
+      this.aimLaser.visible = false;
+      this.aimDot.visible = false;
+      this.supportRing.visible = false;
+      this.magicManager.enabled = true;
+    } else {
+      this.turntable.mountNode.visible = true;
+      this.weaponRoot.visible = true;
+      if (this.isGunHeld) {
+        this.aimLaser.visible = true;
+        this.aimDot.visible = true;
+      }
+      this.magicManager.enabled = false;
+    }
   }
 
   setupAimLaser() {
@@ -281,6 +306,12 @@ export class SceneManager {
   }
 
   update(dt, handTrackingData = null, mouseControlData = null) {
+    if (this.section === 'magic') {
+      this.magicManager.update(dt, handTrackingData, mouseControlData);
+      this.magicManager.render();
+      return;
+    }
+
     // Update Turntable
     this.turntable.update(dt, this.isGunHeld);
 
@@ -315,15 +346,15 @@ export class SceneManager {
         if (supportHand && (isTwoHandGun || isOptTwoHand)) {
           const distToForegrip = supportHand.position.distanceTo(foregripWorld);
           const isClosedGrip = supportHand.gestures && supportHand.gestures.pose !== 'open';
-          // Within 25cm and closed/cupped grip
-          if (distToForegrip < 0.28 && isClosedGrip) {
+          // Within 35cm and closed/cupped grip for comfortable attachment
+          if (distToForegrip < 0.35 && isClosedGrip) {
             attached = true;
           }
         }
         this.isSupportAttached = attached;
 
         if (attached && supportHand) {
-          // TWO-HAND AIMING: barrel points along line from trigger hand to support hand
+          // TWO-HAND AIMING: barrel points smoothly along line from trigger hand to support hand
           const fwd = new THREE.Vector3().subVectors(supportHand.position, triggerHand.position).normalize();
           const triggerUp = new THREE.Vector3(0, 1, 0).applyQuaternion(triggerHand.quaternion);
           const right = new THREE.Vector3().crossVectors(fwd, triggerUp).normalize();
@@ -335,14 +366,13 @@ export class SceneManager {
           // ONE-HAND AIMING
           targetQuat.copy(triggerHand.quaternion);
 
-          // If it's a two-handed gun without support, add realistic droop & wobble
+          // If it's a two-handed gun without support, apply gentle realistic weight droop
           if (isTwoHandGun) {
             const time = performance.now() * 0.001;
-            // Droop forward/down (~20 degrees)
-            const droopAngle = 0.36;
-            const wobblePitch = Math.sin(time * 2.3) * 0.07 + Math.cos(time * 3.8) * 0.03;
-            const wobbleYaw = Math.sin(time * 1.6) * 0.05 + Math.cos(time * 3.1) * 0.02;
-            const wobbleRoll = Math.sin(time * 2.7) * 0.035;
+            const droopAngle = 0.20; // ~11 degrees natural muzzle sag
+            const wobblePitch = Math.sin(time * 1.3) * 0.020 + Math.cos(time * 2.1) * 0.010;
+            const wobbleYaw = Math.sin(time * 0.9) * 0.016 + Math.cos(time * 1.7) * 0.008;
+            const wobbleRoll = Math.sin(time * 1.5) * 0.012;
 
             const extraRot = new THREE.Euler(droopAngle + wobblePitch, wobbleYaw, wobbleRoll);
             const extraQuat = new THREE.Quaternion().setFromEuler(extraRot);
@@ -366,13 +396,13 @@ export class SceneManager {
 
         this.isSupportAttached = mouseControlData.twoHands !== false;
 
-        // If two-handed weapon is unsupported in mouse mode, apply droop and wobble
+        // If two-handed weapon is unsupported in mouse mode, apply gentle weight droop
         if (isTwoHandGun && !this.isSupportAttached) {
           const time = performance.now() * 0.001;
-          const droopAngle = 0.36;
-          const wobblePitch = Math.sin(time * 2.3) * 0.07 + Math.cos(time * 3.8) * 0.03;
-          const wobbleYaw = Math.sin(time * 1.6) * 0.05 + Math.cos(time * 3.1) * 0.02;
-          const wobbleRoll = Math.sin(time * 2.7) * 0.035;
+          const droopAngle = 0.20;
+          const wobblePitch = Math.sin(time * 1.3) * 0.020 + Math.cos(time * 2.1) * 0.010;
+          const wobbleYaw = Math.sin(time * 0.9) * 0.016 + Math.cos(time * 1.7) * 0.008;
+          const wobbleRoll = Math.sin(time * 1.5) * 0.012;
 
           const extraRot = new THREE.Euler(droopAngle + wobblePitch, wobbleYaw, wobbleRoll);
           const extraQuat = new THREE.Quaternion().setFromEuler(extraRot);
@@ -503,5 +533,8 @@ export class SceneManager {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    if (this.magicManager) {
+      this.magicManager.onResize();
+    }
   }
 }

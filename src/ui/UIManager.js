@@ -7,29 +7,53 @@ import * as THREE from 'three';
 import { ProceduralGuns } from '../models/ProceduralGuns.js';
 
 export class UIManager {
-  constructor(gunList, onSelectGun, onFire, onReload, onReset, onRecalibrate, onSensitivityChange) {
+  constructor(gunList, powerList, onSelectGun, onSelectPower, onFire, onReload, onReset, onRecalibrate, onSensitivityChange, onSectionSwitch) {
     this.gunList = gunList;
+    this.powerList = powerList || [];
     this.onSelectGun = onSelectGun;
+    this.onSelectPower = onSelectPower;
     this.onFire = onFire;
     this.onReload = onReload;
     this.onReset = onReset;
     this.onRecalibrate = onRecalibrate;
     this.onSensitivityChange = onSensitivityChange;
+    this.onSectionSwitch = onSectionSwitch;
 
+    this.section = 'guns';
     this.selectedGunIndex = 0;
+    this.selectedPowerIndex = 0;
     this.isDrawerOpen = false;
+    this.isMagicDrawerOpen = false;
     this.thumbnailItems = [];
 
     this.initDOM();
   }
 
   initDOM() {
+    this.appTitle = document.querySelector('#app-title');
+    this.appSubtitle = document.querySelector('#app-subtitle');
+    this.btnSecGuns = document.querySelector('#btn-sec-guns');
+    this.btnSecMagic = document.querySelector('#btn-sec-magic');
+
     this.pickBtn = document.querySelector('#pick');
     this.pickCanvas = document.querySelector('#pick canvas');
     this.pickLabel = document.querySelector('#pick b');
     this.pickSub = document.querySelector('#pick2 small');
+
+    this.pickMagicBtn = document.querySelector('#pick-magic');
+    this.pickMagicCanvas = document.querySelector('#magic-preview-canvas');
+    this.pickMagicTitle = document.querySelector('#active-power-title');
+
+    this.magicEnergyCard = document.querySelector('#magic-energy-card');
+    this.energyVal = document.querySelector('#energy-val');
+    this.energyBarFill = document.querySelector('#energy-bar-fill');
+    this.magicGestureTip = document.querySelector('#magic-gesture-tip');
+
     this.drawers = document.querySelector('#drawers');
     this.grid = document.querySelector('#grid');
+    this.magicDrawers = document.querySelector('#magic-drawers');
+    this.magicGrid = document.querySelector('#magic-grid');
+
     this.hud = document.querySelector('#hud');
     this.hudLab = document.querySelector('#lab');
     this.hudIns = document.querySelector('#ins');
@@ -44,6 +68,16 @@ export class UIManager {
     this.chipTrigger = document.querySelector('#chip-trigger');
     this.supportHint = document.querySelector('#support-hint');
 
+    // Bottom pills
+    this.swBtn = document.querySelector('#sw');
+    this.fireBtn = document.querySelector('#fire-btn');
+
+    // Section Toggle Events
+    if (this.btnSecGuns && this.btnSecMagic) {
+      this.btnSecGuns.onclick = () => this.switchSection('guns');
+      this.btnSecMagic.onclick = () => this.switchSection('magic');
+    }
+
     // Sensitivity Slider
     this.sensSlider = document.querySelector('#sens-slider');
     this.sensVal = document.querySelector('#sens-val');
@@ -55,17 +89,161 @@ export class UIManager {
       };
     }
 
-    // Drawer grid setup
+    // Drawer grid setups
     this.setupDrawerGrid();
+    this.setupMagicGrid();
 
     // Event listeners
     document.querySelector('#x').onclick = () => this.closeDrawer();
+    const magicX = document.querySelector('#magic-x');
+    if (magicX) magicX.onclick = () => this.closeMagicDrawer();
+
     this.pickBtn.onclick = () => this.openDrawer();
-    document.querySelector('#pick2').onclick = () => this.openDrawer();
-    document.querySelector('#sw').onclick = () => this.openDrawer();
+    if (this.pickMagicBtn) this.pickMagicBtn.onclick = () => this.openMagicDrawer();
+    document.querySelector('#pick2').onclick = () => {
+      if (this.section === 'magic') this.openMagicDrawer();
+      else this.openDrawer();
+    };
+
+    if (this.swBtn) {
+      this.swBtn.onclick = () => {
+        if (this.section === 'magic') this.openMagicDrawer();
+        else this.openDrawer();
+      };
+    }
+
     document.querySelector('#rs').onclick = () => this.onReset();
-    document.querySelector('#fire-btn').onclick = () => this.onFire();
+    if (this.fireBtn) this.fireBtn.onclick = () => this.onFire();
     document.querySelector('#recal-btn').onclick = () => this.onRecalibrate();
+  }
+
+  switchSection(section) {
+    if (this.section === section) return;
+    this.section = section;
+
+    if (section === 'magic') {
+      if (this.btnSecGuns) this.btnSecGuns.classList.remove('active');
+      if (this.btnSecMagic) this.btnSecMagic.classList.add('active');
+      if (this.pickBtn) this.pickBtn.hidden = true;
+      if (this.pickMagicBtn) this.pickMagicBtn.hidden = false;
+      if (this.hud) this.hud.hidden = true;
+      if (this.magicEnergyCard) this.magicEnergyCard.hidden = false;
+      if (this.drawers) this.drawers.hidden = true;
+      if (this.supportHint) this.supportHint.hidden = true;
+      if (this.appTitle) this.appTitle.innerHTML = 'Magic <i>Sanctum</i>';
+      if (this.appSubtitle) this.appSubtitle.textContent = 'Elemental hand-gesture sorcery';
+      if (this.swBtn) this.swBtn.textContent = 'switch power';
+      if (this.fireBtn) this.fireBtn.textContent = '✨ cast';
+    } else {
+      if (this.btnSecGuns) this.btnSecGuns.classList.add('active');
+      if (this.btnSecMagic) this.btnSecMagic.classList.remove('active');
+      if (this.pickBtn) this.pickBtn.hidden = false;
+      if (this.pickMagicBtn) this.pickMagicBtn.hidden = true;
+      if (this.hud) this.hud.hidden = false;
+      if (this.magicEnergyCard) this.magicEnergyCard.hidden = true;
+      if (this.magicDrawers) this.magicDrawers.hidden = true;
+      if (this.appTitle) this.appTitle.innerHTML = 'Gun <i>Shop</i>';
+      if (this.appSubtitle) this.appSubtitle.textContent = 'The online armoury';
+      if (this.swBtn) this.swBtn.textContent = 'switch gun';
+      if (this.fireBtn) this.fireBtn.textContent = '💥 fire';
+    }
+
+    if (this.onSectionSwitch) {
+      this.onSectionSwitch(section);
+    }
+  }
+
+  setupMagicGrid() {
+    if (!this.magicGrid || !this.powerList) return;
+    this.magicGrid.innerHTML = this.powerList.map((p, i) => `
+      <div class="power-card ${i === this.selectedPowerIndex ? 'active' : ''}" data-index="${i}">
+        <div class="power-card-top">
+          <span class="power-card-badge" style="background:${p.themeColor}">${p.badge}</span>
+          <span class="power-card-icon">${p.icon}</span>
+        </div>
+        <div class="power-card-title">${p.name}</div>
+        <div class="power-card-hint">${p.hint}</div>
+        <div class="power-card-tip">${p.controlsHint}</div>
+      </div>
+    `).join('');
+
+    this.magicGrid.onclick = (e) => {
+      const card = e.target.closest('.power-card');
+      if (card) {
+        const idx = parseInt(card.dataset.index, 10);
+        this.selectPower(idx);
+        this.closeMagicDrawer();
+      }
+    };
+
+    if (this.powerList.length > 0) {
+      this.updateMagicPreviewCanvas(this.powerList[this.selectedPowerIndex]);
+    }
+  }
+
+  openMagicDrawer() {
+    this.isMagicDrawerOpen = true;
+    if (this.magicDrawers) this.magicDrawers.hidden = false;
+    if (this.intro) this.intro.style.visibility = 'hidden';
+    const cards = this.magicGrid.querySelectorAll('.power-card');
+    cards.forEach((c, i) => c.classList.toggle('active', i === this.selectedPowerIndex));
+  }
+
+  closeMagicDrawer() {
+    this.isMagicDrawerOpen = false;
+    if (this.magicDrawers) this.magicDrawers.hidden = true;
+    if (this.intro) this.intro.style.visibility = '';
+  }
+
+  selectPower(idx) {
+    this.selectedPowerIndex = idx;
+    const power = this.powerList[idx];
+    if (this.pickMagicTitle) {
+      this.pickMagicTitle.innerHTML = `${power.name} <i>${power.badge}</i>`;
+    }
+    this.updateMagicPreviewCanvas(power);
+    if (this.onSelectPower) this.onSelectPower(idx);
+  }
+
+  updateMagicPreviewCanvas(power) {
+    if (!this.pickMagicCanvas || !power) return;
+    const ctx = this.pickMagicCanvas.getContext('2d');
+    const w = this.pickMagicCanvas.width;
+    const h = this.pickMagicCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Dynamic elemental gradient background
+    const grad = ctx.createRadialGradient(w / 2, h / 2, 2, w / 2, h / 2, w / 2);
+    grad.addColorStop(0, power.themeColor);
+    grad.addColorStop(0.7, 'rgba(40, 42, 50, 0.85)');
+    grad.addColorStop(1, 'rgba(20, 22, 28, 0.95)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+
+    // Glowing icon
+    ctx.font = '26px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = power.themeColor;
+    ctx.shadowBlur = 12;
+    ctx.fillText(power.icon, w / 2, h / 2);
+    ctx.shadowBlur = 0;
+  }
+
+  updateMagicEnergy(energy, maxEnergy, activePower) {
+    if (!this.magicEnergyCard) return;
+    if (this.energyVal) {
+      this.energyVal.textContent = `${Math.round(energy)} / ${maxEnergy}`;
+    }
+    if (this.energyBarFill) {
+      const pct = Math.max(0, Math.min(100, (energy / maxEnergy) * 100));
+      this.energyBarFill.style.width = `${pct}%`;
+      this.energyBarFill.style.background = `linear-gradient(90deg, ${activePower.themeColor}, #ffffff)`;
+      this.energyBarFill.style.boxShadow = `0 0 10px ${activePower.themeColor}`;
+    }
+    if (this.magicGestureTip) {
+      this.magicGestureTip.textContent = activePower.tip;
+    }
   }
 
   setupDrawerGrid() {
@@ -251,6 +429,34 @@ export class UIManager {
       this.setChip(this.chipTrigger, 'on', 'Trigger armed');
     } else {
       this.setChip(this.chipTrigger, 'off', 'Trigger released');
+    }
+  }
+
+  updateMagicStatusChips(trackingData, activePower, energy, mode = 'cam') {
+    if (!this.chipHand) return;
+
+    const numHands = trackingData ? (trackingData.numHands || 0) : 0;
+    if (mode === 'mouse') {
+      this.setChip(this.chipHand, 'info', 'Mouse Mode');
+    } else if (numHands === 0) {
+      this.setChip(this.chipHand, 'off', 'No Hand');
+    } else if (numHands === 1) {
+      this.setChip(this.chipHand, 'on', '1 Hand Found');
+    } else {
+      this.setChip(this.chipHand, 'info', '2 Hands Found');
+    }
+
+    if (activePower) {
+      this.setChip(this.chipHold, 'info', `${activePower.name}`);
+    }
+
+    const energyPct = Math.round(energy);
+    if (energyPct > 40) {
+      this.setChip(this.chipTrigger, 'on', `⚡ ${energyPct}% Energy`);
+    } else if (energyPct > 15) {
+      this.setChip(this.chipTrigger, 'warn', `⚡ ${energyPct}% Low`);
+    } else {
+      this.setChip(this.chipTrigger, 'off', `⚡ ${energyPct}% Empty`);
     }
   }
 
