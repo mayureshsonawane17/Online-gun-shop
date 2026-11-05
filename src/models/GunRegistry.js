@@ -4,15 +4,15 @@
  */
 
 export const CATEGORIES = {
-  Pistol: { category: 'Pistol', mag: 15, rate: 220, auto: false, reloadTime: 1100, recoilKick: 0.8, length: 0.22, big: false },
-  Revolver: { category: 'Revolver', mag: 6, rate: 450, auto: false, reloadTime: 1900, recoilKick: 1.2, length: 0.28, big: false },
-  SMG: { category: 'SMG', mag: 30, rate: 70, auto: true, reloadTime: 1300, recoilKick: 0.45, length: 0.42, big: false },
-  Rifle: { category: 'Rifle', mag: 30, rate: 95, auto: true, reloadTime: 1500, recoilKick: 0.65, length: 0.74, big: false },
-  Sniper: { category: 'Sniper', mag: 5, rate: 1100, auto: false, reloadTime: 1900, recoilKick: 1.5, length: 0.98, big: true },
-  Shotgun: { category: 'Shotgun', mag: 6, rate: 800, auto: false, reloadTime: 1700, recoilKick: 1.6, length: 0.78, big: true },
-  LMG: { category: 'LMG', mag: 100, rate: 100, auto: true, reloadTime: 2800, recoilKick: 0.75, length: 0.85, big: true },
-  Minigun: { category: 'Minigun', mag: 300, rate: 35, auto: true, reloadTime: 3200, recoilKick: 0.85, length: 0.88, big: true },
-  Launcher: { category: 'Launcher', mag: 1, rate: 1500, auto: false, reloadTime: 2800, recoilKick: 1.8, length: 1.05, big: true, backblast: true }
+  Pistol: { category: 'Pistol', mag: 15, rate: 220, auto: false, reloadTime: 1100, recoilKick: 0.8, length: 0.20, big: false, hands: 'one', weight: 1.0, followSpeed: 22, requiresSupport: false },
+  Revolver: { category: 'Revolver', mag: 6, rate: 450, auto: false, reloadTime: 1900, recoilKick: 1.2, length: 0.24, big: false, hands: 'one', weight: 1.3, followSpeed: 20, requiresSupport: false },
+  SMG: { category: 'SMG', mag: 30, rate: 70, auto: true, reloadTime: 1300, recoilKick: 0.45, length: 0.32, big: false, hands: 'optional-two', weight: 2.6, followSpeed: 14, foregripDist: 0.18, requiresSupport: false },
+  Rifle: { category: 'Rifle', mag: 30, rate: 95, auto: true, reloadTime: 1500, recoilKick: 0.65, length: 0.46, big: false, hands: 'two', weight: 3.6, followSpeed: 9.5, foregripDist: 0.26, requiresSupport: false },
+  Sniper: { category: 'Sniper', mag: 5, rate: 1100, auto: false, reloadTime: 1900, recoilKick: 1.5, length: 0.55, big: true, hands: 'two', weight: 6.8, followSpeed: 5.5, foregripDist: 0.32, requiresSupport: true },
+  Shotgun: { category: 'Shotgun', mag: 6, rate: 800, auto: false, reloadTime: 1700, recoilKick: 1.6, length: 0.48, big: true, hands: 'two', weight: 4.2, followSpeed: 8.5, foregripDist: 0.25, requiresSupport: false },
+  LMG: { category: 'LMG', mag: 100, rate: 100, auto: true, reloadTime: 2800, recoilKick: 0.75, length: 0.52, big: true, hands: 'two', weight: 8.5, followSpeed: 4.8, foregripDist: 0.30, requiresSupport: true },
+  Minigun: { category: 'Minigun', mag: 300, rate: 35, auto: true, reloadTime: 3200, recoilKick: 0.85, length: 0.54, big: true, hands: 'two', weight: 18.0, followSpeed: 3.2, foregripDist: 0.28, requiresSupport: true },
+  Launcher: { category: 'Launcher', mag: 1, rate: 1500, auto: false, reloadTime: 2800, recoilKick: 1.8, length: 0.60, big: true, backblast: true, hands: 'two', weight: 7.2, followSpeed: 5.0, foregripDist: 0.29, requiresSupport: true }
 };
 
 const AK_OVERRIDE = { rate: 105, recoilKick: 0.75 };

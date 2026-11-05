@@ -473,3 +473,121 @@ ol span {
   transition: opacity 0.3s ease;
   z-index: 100;
 }
+
+/* Status Chips Container */
+#chips-container {
+  position: fixed;
+  top: 36px;
+  left: 280px;
+  display: flex;
+  gap: 10px;
+  z-index: 12;
+  pointer-events: none;
+}
+
+.chip {
+  background: rgba(25, 27, 34, 0.75);
+  backdrop-filter: blur(8px);
+  color: #e2e4ed;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 99px;
+  padding: 5px 12px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: ui-monospace, Menlo, Monaco, Consolas, monospace;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.chip .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #777;
+  display: inline-block;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.chip .dot.on {
+  background: #3df0a0;
+  color: #3df0a0;
+}
+
+.chip .dot.off {
+  background: #666;
+  color: #666;
+  box-shadow: none;
+}
+
+.chip .dot.active {
+  background: #ff4d4d;
+  color: #ff4d4d;
+}
+
+.chip .dot.warn {
+  background: #ffaa33;
+  color: #ffaa33;
+}
+
+.chip .dot.info {
+  background: #5b9cf6;
+  color: #5b9cf6;
+}
+
+/* Two-Hand Support Hint */
+#support-hint {
+  position: fixed;
+  top: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #fffbe6;
+  color: #875c12;
+  border: 1.5px solid #e0be6c;
+  padding: 8px 20px;
+  border-radius: 99px;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  animation: pulseHint 1.8s infinite ease-in-out;
+  z-index: 20;
+  pointer-events: none;
+}
+
+@keyframes pulseHint {
+  0%, 100% { transform: translateX(-50%) scale(1); }
+  50% { transform: translateX(-50%) scale(1.03); }
+}
+
+/* Sensitivity Slider Pill */
+.sens-pill {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px !important;
+  font-size: 14px !important;
+}
+
+.sens-label {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #555;
+}
+
+#sens-slider {
+  width: 70px;
+  accent-color: var(--slate);
+  cursor: pointer;
+}
+
+#sens-val {
+  font-size: 13px;
+  font-family: ui-monospace, Menlo, Monaco, monospace;
+  color: var(--ink);
+  min-width: 30px;
+}

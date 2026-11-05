@@ -1,9 +1,9 @@
 /**
  * main.js
  * Application entry point for the 3D Webcam Hand-Gesture Online Gun Shop
- * Integrates Three.js 3D rendering, MediaPipe hand tracking with 1€ filter,
- * scale-invariant multi-condition gesture firing, layered Web Audio synthesis,
- * GPU instanced smoke, and interactive UI.
+ * Integrates Three.js 3D rendering, persistent two-hand tracking, One Euro filter with dead zone,
+ * thumb-movement scale-invariant trigger firing, grip-change gating, weapon weight inertia,
+ * two-hand aiming with foregrip attachment, layered Web Audio synthesis, and GPU smoke effects.
  */
 import * as THREE from 'three';
 window.THREE = THREE;
@@ -33,8 +33,13 @@ class GunShopApp {
     this.barrelHeat = 0;
     this.prevFrameTime = performance.now();
 
+    // Forgiving grab & tracking grace period
+    this.trackingLostTimer = 0; // seconds tracking has been lost
+    this.prevShotgunDist = 0;
+    this.shotgunPumpPrimed = false;
+
     // Mouse controls fallback
-    this.mouse = { x: 0.22, y: -0.15, down: false, click: false, angle: 0, hasMoved: false };
+    this.mouse = { x: 0.22, y: -0.15, down: false, click: false, angle: 0, hasMoved: false, twoHands: true };
 
     // Subsystems
     this.audio = new GunAudio();
@@ -55,7 +60,8 @@ class GunShopApp {
       () => this.fire(performance.now()),
       () => this.reload(),
       () => this.reset(),
-      () => this.startCalibration()
+      () => this.startCalibration(),
+      (sens) => this.handTracker.setSensitivity(sens)
     );
 
     this.setupEventListeners();
@@ -97,7 +103,7 @@ class GunShopApp {
           // Check if clicked near stand in bottom-left
           const standScreen = { x: window.innerWidth * 0.22, y: window.innerHeight * 0.72 };
           const dist = Math.hypot(e.clientX - standScreen.x, e.clientY - standScreen.y);
-          if (dist < 180) {
+          if (dist < 260) {
             this.grab();
           }
         }
@@ -124,6 +130,10 @@ class GunShopApp {
         this.reload();
       } else if (e.key === 'Escape') {
         this.drop();
+      } else if (e.key === 't' || e.key === 'T' || e.key === 'Shift') {
+        if (this.mode === 'mouse') {
+          this.mouse.twoHands = !this.mouse.twoHands;
+        }
       } else if (e.key === 'ArrowRight') {
         this.selectGun((this.sel + 1) % this.gunList.length);
       } else if (e.key === 'ArrowLeft') {
@@ -174,7 +184,7 @@ class GunShopApp {
       this.startMode('cam');
 
       // Check first-time calibration
-      const hasCalibrated = localStorage.getItem('gun_shop_gesture_calibration');
+      const hasCalibrated = localStorage.getItem('gun_shop_gesture_calibration_v2');
       if (!hasCalibrated) {
         setTimeout(() => this.startCalibration(), 1200);
       }
@@ -185,16 +195,20 @@ class GunShopApp {
   }
 
   startCalibration() {
-    this.ui.showToast('Starting 3-second calibration: keep hand relaxed…', 3000);
-    this.handTracker.gestureDetector.startCalibration(
+    this.ui.showToast('Starting 3-second calibration: Hold thumb UP & relaxed…', 3000);
+    this.handTracker.getGestureDetector().startCalibration(
       (progressMsg) => this.ui.showToast(progressMsg, 2000),
       (completeMsg) => this.ui.showToast(completeMsg, 3500)
     );
   }
 
-  grab() {
+  grab(handId = null) {
     if (this.held) return;
     this.held = true;
+    this.trackingLostTimer = 0;
+    if (handId) {
+      this.handTracker.triggerHandId = handId;
+    }
     this.sceneManager.setHeld(true);
     this.audio.playMechanical('pickup');
   }
@@ -202,11 +216,12 @@ class GunShopApp {
   drop() {
     if (!this.held) return;
     this.held = false;
+    this.trackingLostTimer = 0;
     this.sceneManager.setHeld(false);
     this.audio.playMechanical('slide');
   }
 
-  fire(now) {
+  fire(now, isUnsupported = false) {
     const gun = this.gunList[this.sel];
     if (this.reloading || this.ammo[this.sel] <= 0) {
       if (this.ammo[this.sel] <= 0 && !this.reloading) {
@@ -219,7 +234,7 @@ class GunShopApp {
     this.lastFireTime = now;
     this.ammo[this.sel]--;
 
-    // If firing while on stand, auto pick up
+    // If firing while on stand in mouse mode, auto pick up
     if (!this.held) {
       this.grab();
     }
@@ -232,7 +247,7 @@ class GunShopApp {
     this.audio.playShot(gun, panX);
 
     // Trigger visual gunfire effects (flash, tracers, 3D casing, smoke blast, recoil spring)
-    this.sceneManager.triggerFire(gun);
+    this.sceneManager.triggerFire(gun, isUnsupported);
 
     // Auto reload when empty
     if (this.ammo[this.sel] === 0) {
@@ -268,45 +283,100 @@ class GunShopApp {
     const gun = this.gunList[this.sel];
     let trackingData = null;
 
+    let isTriggerDown = false;
+    let justFired = false;
+    let isArmed = true;
+    let isGripChanging = false;
+
     // 1. Process Input
     if (this.mode === 'cam') {
       trackingData = this.handTracker.update(now);
 
-      if (trackingData && trackingData.gestures) {
-        const g = trackingData.gestures;
+      if (trackingData) {
+        const numHands = trackingData.numHands;
+        const primary = trackingData.primaryHand;
+        const secondary = trackingData.secondaryHand;
 
-        // Grabbing: fist held inside grab radius near stand
-        if (!this.held) {
-          const standScreen = { x: window.innerWidth * 0.22, y: window.innerHeight * 0.72 };
-          const dist = Math.hypot(trackingData.screen.x - standScreen.x, trackingData.screen.y - standScreen.y);
-          if (dist < 220 && g.fistFrames > 5) {
-            this.grab();
-          }
-        } else {
-          // Putting gun away: open palm held
-          if (g.openFrames > 14) {
-            this.drop();
-          }
-
-          // Firing automatically from hand gesture
+        if (numHands === 0) {
+          // Grace period: do not drop immediately if hand tracking is briefly lost
           if (this.held) {
-            if (gun.auto) {
-              if (g.isTriggerDown) {
-                this.fire(now);
-              }
-            } else {
-              if (g.justFired) {
-                this.fire(now);
-              }
+            this.trackingLostTimer += dt;
+            if (this.trackingLostTimer > 0.50) {
+              this.drop();
             }
           }
+        } else {
+          this.trackingLostTimer = 0;
 
-          // Hand Swipe Left/Right to cycle guns
-          if (g.swipeDirection !== 0) {
-            if (g.swipeDirection > 0) {
-              this.selectGun((this.sel + 1) % this.gunList.length);
-            } else {
-              this.selectGun((this.sel + this.gunList.length - 1) % this.gunList.length);
+          // GRABBING: Forgiving grab zone (280px radius) + 0.2s fist requirement
+          if (!this.held) {
+            const standScreen = { x: window.innerWidth * 0.22, y: window.innerHeight * 0.72 };
+            for (const hand of trackingData.hands) {
+              const dist = Math.hypot(hand.screen.x - standScreen.x, hand.screen.y - standScreen.y);
+              if (dist < 280 && hand.gestures && hand.gestures.fistDuration >= 0.20) {
+                this.grab(hand.id);
+                break;
+              }
+            }
+          } else {
+            // PUTTING AWAY: Open palm held for 0.5s drops weapon
+            if (primary && primary.gestures && primary.gestures.openDuration >= 0.50) {
+              this.drop();
+            }
+
+            // TRIGGER FIRING: Either hand's thumb can fire
+            if (this.held) {
+              const pG = primary ? primary.gestures : null;
+              const sG = secondary ? secondary.gestures : null;
+
+              isTriggerDown = (pG && pG.isTriggerDown) || (sG && sG.isTriggerDown);
+              justFired = (pG && pG.justFired) || (sG && sG.justFired);
+              isGripChanging = (pG && pG.isGripChanging) || (sG && sG.isGripChanging);
+              isArmed = (pG && pG.triggerState === 'ARMED') || (sG && sG.triggerState === 'ARMED');
+
+              const isSupportAttached = this.sceneManager.isSupportAttached;
+
+              // Heavy gun requirement check (snipers, LMG, minigun, launcher cannot fire without 2 hands)
+              if (gun.requiresSupport && !isSupportAttached) {
+                if (justFired) {
+                  this.ui.showToast(`Hold foregrip with your second hand to fire ${gun.name}!`, 2200);
+                  this.audio.playMechanical('dryfire');
+                }
+              } else {
+                const isUnsupported = gun.hands === 'two' && !isSupportAttached;
+                if (gun.auto) {
+                  if (isTriggerDown) {
+                    this.fire(now, isUnsupported);
+                  }
+                } else {
+                  if (justFired) {
+                    this.fire(now, isUnsupported);
+                  }
+                }
+              }
+
+              // Optional extra: Shotgun pump action with support hand motion
+              if (gun.category === 'Shotgun' && primary && secondary && isSupportAttached) {
+                const handDist = primary.position.distanceTo(secondary.position);
+                if (this.prevShotgunDist > 0) {
+                  if (handDist < this.prevShotgunDist - 0.04) {
+                    this.shotgunPumpPrimed = true;
+                  } else if (this.shotgunPumpPrimed && handDist > this.prevShotgunDist + 0.03) {
+                    this.shotgunPumpPrimed = false;
+                    this.audio.playMechanical('pump');
+                  }
+                }
+                this.prevShotgunDist = handDist;
+              }
+
+              // Hand Swipe Left/Right to cycle guns
+              if (pG && pG.swipeDirection !== 0) {
+                if (pG.swipeDirection > 0) {
+                  this.selectGun((this.sel + 1) % this.gunList.length);
+                } else {
+                  this.selectGun((this.sel + this.gunList.length - 1) % this.gunList.length);
+                }
+              }
             }
           }
         }
@@ -315,9 +385,10 @@ class GunShopApp {
       if (this.held) {
         const trig = gun.auto ? this.mouse.down : this.mouse.click;
         if (trig) {
-          this.fire(now);
+          this.fire(now, false);
         }
       }
+      isTriggerDown = this.mouse.down;
       this.mouse.click = false;
     }
 
@@ -339,11 +410,15 @@ class GunShopApp {
     // 3. Update Scene & Effects
     this.sceneManager.update(dt, trackingData, this.mouse);
 
-    // 4. Update UI & Debug
+    // 4. Update UI & Status Chips
     const isFiring = now - this.lastFireTime < 250;
-    this.ui.updateHUD(gun, this.ammo[this.sel], this.held, this.reloading, isFiring, this.mode);
+    const isSupportAttached = this.sceneManager.isSupportAttached;
+
+    this.ui.updateStatusChips(trackingData, this.held, isTriggerDown, isArmed, isGripChanging, this.mode);
+    this.ui.updateSupportHint(this.held, gun, isSupportAttached);
+    this.ui.updateHUD(gun, this.ammo[this.sel], this.held, this.reloading, isFiring, this.mode, isSupportAttached);
     this.ui.updateThumbnails(dt);
-    this.debugOverlay.update(trackingData, this.mode);
+    this.debugOverlay.update(trackingData, this.mode, isSupportAttached, gun);
   }
 }
 

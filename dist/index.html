@@ -4,9 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Gun Shop — the online armoury</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>">
   <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400;1,600&display=swap" rel="stylesheet">
-  <script type="module" crossorigin src="/assets/index-DXsAexUt.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-CGx1aSRB.css">
+  <script type="module" crossorigin src="/assets/index-CN1C4UlJ.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-B_scCeI6.css">
 </head>
 <body>
   <video id="v" playsinline muted></video>
@@ -23,6 +24,19 @@
       <p>The online armoury</p>
     </div>
   </header>
+
+  <!-- Status Chips -->
+  <div id="chips-container">
+    <span class="chip" id="chip-hand"><i class="dot off"></i><span class="txt">No hand</span></span>
+    <span class="chip" id="chip-hold"><i class="dot off"></i><span class="txt">Resting</span></span>
+    <span class="chip" id="chip-trigger"><i class="dot on"></i><span class="txt">Trigger armed</span></span>
+  </div>
+
+  <!-- Two-Hand Support Hint -->
+  <div id="support-hint" hidden>
+    <span class="hint-icon">🤲</span>
+    <span>Use your other hand to support it</span>
+  </div>
 
   <button id="pick" class="card">
     <canvas width="192" height="88"></canvas>
@@ -72,6 +86,11 @@
   <nav id="pills">
     <button class="pill" id="sw">switch gun</button>
     <button class="pill" id="recal-btn">recalibrate</button>
+    <div class="pill sens-pill" title="Gesture Trigger Sensitivity">
+      <span class="sens-label">Sens</span>
+      <input type="range" id="sens-slider" min="0.6" max="1.5" step="0.05" value="1.0">
+      <b id="sens-val">1.0x</b>
+    </div>
     <button class="pill" id="fire-btn">💥 fire</button>
     <button class="pill" id="rs">reset</button>
   </nav>

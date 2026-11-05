@@ -1,19 +1,20 @@
 /**
  * UIManager.js
  * Manages the interface, drawer modal with animated 3D rotating thumbnails,
- * interactive HUD, calibration overlays, and pill controls.
+ * interactive HUD, status chips, sensitivity slider, calibration overlays, and pill controls.
  */
 import * as THREE from 'three';
 import { ProceduralGuns } from '../models/ProceduralGuns.js';
 
 export class UIManager {
-  constructor(gunList, onSelectGun, onFire, onReload, onReset, onRecalibrate) {
+  constructor(gunList, onSelectGun, onFire, onReload, onReset, onRecalibrate, onSensitivityChange) {
     this.gunList = gunList;
     this.onSelectGun = onSelectGun;
     this.onFire = onFire;
     this.onReload = onReload;
     this.onReset = onReset;
     this.onRecalibrate = onRecalibrate;
+    this.onSensitivityChange = onSensitivityChange;
 
     this.selectedGunIndex = 0;
     this.isDrawerOpen = false;
@@ -36,6 +37,23 @@ export class UIManager {
     this.hudBar = document.querySelector('#bar i');
     this.intro = document.querySelector('#intro');
     this.calibToast = document.querySelector('#calib-toast');
+
+    // Status Chips & Support Hint
+    this.chipHand = document.querySelector('#chip-hand');
+    this.chipHold = document.querySelector('#chip-hold');
+    this.chipTrigger = document.querySelector('#chip-trigger');
+    this.supportHint = document.querySelector('#support-hint');
+
+    // Sensitivity Slider
+    this.sensSlider = document.querySelector('#sens-slider');
+    this.sensVal = document.querySelector('#sens-val');
+    if (this.sensSlider) {
+      this.sensSlider.oninput = (e) => {
+        const val = parseFloat(e.target.value);
+        if (this.sensVal) this.sensVal.textContent = `${val.toFixed(2)}x`;
+        if (this.onSensitivityChange) this.onSensitivityChange(val);
+      };
+    }
 
     // Drawer grid setup
     this.setupDrawerGrid();
@@ -204,19 +222,73 @@ export class UIManager {
     }, duration);
   }
 
-  updateHUD(gun, ammoCount, isHeld, isReloading, isFiring, mode = 'cam') {
+  updateStatusChips(trackingData, isHeld, isTriggerDown, isArmed, isGripChanging, mode = 'cam') {
+    if (!this.chipHand) return;
+
+    if (mode === 'mouse') {
+      this.setChip(this.chipHand, 'info', 'Mouse mode');
+      this.setChip(this.chipHold, isHeld ? 'info' : 'off', isHeld ? 'Holding' : 'Resting');
+      this.setChip(this.chipTrigger, isTriggerDown ? 'active' : 'on', isTriggerDown ? 'Firing' : 'Trigger ready');
+      return;
+    }
+
+    const numHands = trackingData ? (trackingData.numHands || 0) : 0;
+    if (numHands === 0) {
+      this.setChip(this.chipHand, 'off', 'No hand');
+    } else if (numHands === 1) {
+      this.setChip(this.chipHand, 'on', '1 Hand found');
+    } else {
+      this.setChip(this.chipHand, 'info', '2 Hands found');
+    }
+
+    this.setChip(this.chipHold, isHeld ? 'info' : 'off', isHeld ? 'Holding' : 'Resting');
+
+    if (isTriggerDown) {
+      this.setChip(this.chipTrigger, 'active', 'Trigger pressed');
+    } else if (isGripChanging) {
+      this.setChip(this.chipTrigger, 'warn', 'Grip changing');
+    } else if (isArmed) {
+      this.setChip(this.chipTrigger, 'on', 'Trigger armed');
+    } else {
+      this.setChip(this.chipTrigger, 'off', 'Trigger released');
+    }
+  }
+
+  setChip(el, state, text) {
+    if (!el) return;
+    const dot = el.querySelector('.dot');
+    const txt = el.querySelector('.txt');
+    if (dot) {
+      dot.className = `dot ${state}`;
+    }
+    if (txt) {
+      txt.textContent = text;
+    }
+  }
+
+  updateSupportHint(isHeld, currentGun, isSupportAttached) {
+    if (!this.supportHint) return;
+    if (isHeld && currentGun && currentGun.hands === 'two' && !isSupportAttached) {
+      this.supportHint.hidden = false;
+    } else {
+      this.supportHint.hidden = true;
+    }
+  }
+
+  updateHUD(gun, ammoCount, isHeld, isReloading, isFiring, mode = 'cam', isSupportAttached = false) {
     const isCam = mode === 'cam';
     const step = !isHeld ? 1 : isFiring ? 3 : 2;
 
-    this.hudLab.textContent = `Step ${step} of 3 · ${isReloading ? 'reloading' : isHeld ? (isFiring ? 'firing' : 'armed') : 'resting'}`;
+    this.hudLab.textContent = `Step ${step} of 3 · ${isReloading ? 'reloading' : isHeld ? (isFiring ? 'firing' : (gun.hands === 'two' && !isSupportAttached ? 'unsupported droop' : 'armed')) : 'resting'}`;
 
     this.hudIns.textContent = [
-      isCam ? 'Close your fist inside the circle to pick the gun up' : 'Click the stand circle to pick the gun up',
-      isCam ? 'Drop thumb or curl index to fire · open palm to put back' : 'Click or Space to fire · right-click to put back',
-      isCam ? 'Open your palm to put the gun back' : 'Right-click or Esc to put it back'
+      isCam ? 'Hold a fist for 0.2s near the stand to pick up' : 'Click the stand circle to pick up',
+      isCam ? 'Press thumb down to fire · hold open palm for 0.5s to put back' : 'Click or Space to fire · right-click to put back',
+      isCam ? 'Hold open palm for 0.5s to put gun back' : 'Right-click or Esc to put it back'
     ][step - 1];
 
-    this.hudAm.textContent = `${isReloading ? 'reloading…' : ammoCount + ' / ' + gun.mag + ' rounds'} · ${gun.name}${gun.auto ? ' · full auto' : ' · semi auto'}`;
+    const supportTag = (gun.hands === 'two') ? (isSupportAttached ? ' · 2-hand locked' : ' · needs 2nd hand') : '';
+    this.hudAm.textContent = `${isReloading ? 'reloading…' : ammoCount + ' / ' + gun.mag + ' rounds'} · ${gun.name}${gun.auto ? ' · full auto' : ' · semi auto'}${supportTag}`;
 
     this.hudBar.style.width = `${isReloading ? 0 : (ammoCount / gun.mag) * 100}%`;
   }

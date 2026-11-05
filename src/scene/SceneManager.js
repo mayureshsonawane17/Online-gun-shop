@@ -2,6 +2,13 @@
  * SceneManager.js
  * Central Three.js 3D viewport manager: renderer, camera, studio PBR lighting,
  * environment map, shadow plane, weapon mount, idle sway, and effect orchestration.
+ *
+ * Upgraded Features:
+ * - Weapon weight & inertia lag (light pistols follow fast, heavy launchers follow with weight)
+ * - Two-hand aiming (barrel aligns from rear trigger hand to front support hand)
+ * - Foregrip support ring (shows locked green ring when attached; pulsing amber guide when needed)
+ * - Unsupported two-handed weapon droop & unsteady wobble
+ * - Aim laser line and glowing aim dot extending forward from the muzzle
  */
 import * as THREE from 'three';
 import { Turntable } from './Turntable.js';
@@ -51,7 +58,13 @@ export class SceneManager {
 
     this.recoilSpring = new RecoilSpring();
 
-    // 7. Visual Effects
+    // 7. Aim Laser & Aim Dot
+    this.setupAimLaser();
+
+    // 8. Foregrip Support Ring
+    this.setupSupportRing();
+
+    // 9. Visual Effects
     this.muzzleFlash = new MuzzleFlash(this.scene);
     this.gpuSmoke = new GPUSmoke(this.scene, 1000);
     this.bulletTracers = new BulletTracers(this.scene, 50);
@@ -69,7 +82,68 @@ export class SceneManager {
     this.weaponVelocity = new THREE.Vector3();
     this.prevWeaponPos = new THREE.Vector3();
 
+    // Weight & follow smoothing
+    this.currentFollowPos = new THREE.Vector3();
+    this.currentFollowQuat = new THREE.Quaternion();
+    this.isSupportAttached = false;
+
     window.addEventListener('resize', () => this.onResize());
+  }
+
+  setupAimLaser() {
+    // Thin laser line
+    const laserGeo = new THREE.BufferGeometry();
+    const positions = new Float32Array(6);
+    laserGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const laserMat = new THREE.LineBasicMaterial({
+      color: 0xff3b30,
+      transparent: true,
+      opacity: 0.65,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    this.aimLaser = new THREE.Line(laserGeo, laserMat);
+    this.aimLaser.frustumCulled = false;
+    this.aimLaser.visible = false;
+    this.scene.add(this.aimLaser);
+
+    // Glowing aim dot
+    const dotCanvas = document.createElement('canvas');
+    dotCanvas.width = dotCanvas.height = 32;
+    const dotCtx = dotCanvas.getContext('2d');
+    const grad = dotCtx.createRadialGradient(16, 16, 0, 16, 16, 16);
+    grad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+    grad.addColorStop(0.25, 'rgba(255, 60, 60, 0.9)');
+    grad.addColorStop(0.65, 'rgba(255, 20, 20, 0.3)');
+    grad.addColorStop(1, 'rgba(255, 0, 0, 0)');
+    dotCtx.fillStyle = grad;
+    dotCtx.fillRect(0, 0, 32, 32);
+
+    const dotTex = new THREE.CanvasTexture(dotCanvas);
+    const dotMat = new THREE.SpriteMaterial({
+      map: dotTex,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    this.aimDot = new THREE.Sprite(dotMat);
+    this.aimDot.scale.set(0.038, 0.038, 1);
+    this.aimDot.visible = false;
+    this.scene.add(this.aimDot);
+  }
+
+  setupSupportRing() {
+    const ringGeo = new THREE.TorusGeometry(0.045, 0.005, 16, 32);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0x3df0a0,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    this.supportRing = new THREE.Mesh(ringGeo, ringMat);
+    this.supportRing.visible = false;
+    this.weaponRoot.add(this.supportRing);
   }
 
   setupLighting() {
@@ -103,7 +177,6 @@ export class SceneManager {
   }
 
   setupEnvironmentMap() {
-    // Generate a studio gradient environment map via PMREM
     const pmremGen = new THREE.PMREMGenerator(this.renderer);
     pmremGen.compileEquirectangularShader();
 
@@ -120,7 +193,6 @@ export class SceneManager {
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 256, 128);
 
-    // Studio lights reflection on canvas
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(40, 20, 60, 25);
     ctx.fillRect(160, 30, 45, 18);
@@ -141,17 +213,35 @@ export class SceneManager {
     this.currentGunMeta = gunMeta;
     this.weaponRoot.add(this.currentGunGroup);
     this.recoilSpring.reset();
+
+    // Reposition support ring for this gun's foregrip
+    const fgDist = gunMeta.foregripDist || 0.26;
+    this.supportRing.position.set(0, 0.02, fgDist);
   }
 
   setHeld(isHeld) {
     this.isGunHeld = isHeld;
+    if (!isHeld) {
+      this.isSupportAttached = false;
+      this.aimLaser.visible = false;
+      this.aimDot.visible = false;
+      this.supportRing.visible = false;
+    }
   }
 
-  triggerFire(gunMeta) {
+  getForegripWorldPosition() {
+    const fgDist = this.currentGunMeta?.foregripDist || 0.26;
+    const local = new THREE.Vector3(0, 0.02, fgDist);
+    local.applyMatrix4(this.weaponRoot.matrixWorld);
+    return local;
+  }
+
+  triggerFire(gunMeta, isUnsupported = false) {
     if (!this.currentGunGroup) return;
 
-    // Physical recoil kick
-    const kickStr = (gunMeta.recoilKick || 1.0) * (gunMeta.big ? 1.5 : 1.0);
+    // Physical recoil kick (heavier kick if unsupported two-handed rifle/shotgun)
+    const extraRecoil = isUnsupported ? 1.8 : 1.0;
+    const kickStr = (gunMeta.recoilKick || 1.0) * (gunMeta.big ? 1.4 : 1.0) * extraRecoil;
     this.recoilSpring.kick(kickStr);
 
     // Locate Muzzle & Ejection in world space
@@ -198,7 +288,7 @@ export class SceneManager {
     const targetHeldLerp = this.isGunHeld ? 1.0 : 0.0;
     this.heldLerp += (targetHeldLerp - this.heldLerp) * (1.0 - Math.exp(-dt * 9.0));
 
-    // Target position & orientation
+    // Stand world position & orientation
     const standPos = this.turntable.getStandWorldPosition();
     const standQuat = new THREE.Quaternion();
     this.turntable.mountNode.getWorldQuaternion(standQuat);
@@ -206,11 +296,59 @@ export class SceneManager {
     const targetPos = new THREE.Vector3();
     const targetQuat = new THREE.Quaternion();
 
+    const gun = this.currentGunMeta || { hands: 'one', weight: 1.0, followSpeed: 20 };
+    const isTwoHandGun = gun.hands === 'two';
+    const isOptTwoHand = gun.hands === 'optional-two';
+
     if (this.isGunHeld) {
-      if (handTrackingData) {
-        // Track Hand
-        targetPos.copy(handTrackingData.position);
-        targetQuat.copy(handTrackingData.quaternion);
+      if (handTrackingData && (handTrackingData.primaryHand || handTrackingData.position)) {
+        const triggerHand = handTrackingData.primaryHand || handTrackingData;
+        const supportHand = handTrackingData.secondaryHand || null;
+
+        // Position rear grip at trigger hand
+        targetPos.copy(triggerHand.position);
+
+        // Check if support hand attaches to foregrip
+        const foregripWorld = this.getForegripWorldPosition();
+        let attached = false;
+
+        if (supportHand && (isTwoHandGun || isOptTwoHand)) {
+          const distToForegrip = supportHand.position.distanceTo(foregripWorld);
+          const isClosedGrip = supportHand.gestures && supportHand.gestures.pose !== 'open';
+          // Within 25cm and closed/cupped grip
+          if (distToForegrip < 0.28 && isClosedGrip) {
+            attached = true;
+          }
+        }
+        this.isSupportAttached = attached;
+
+        if (attached && supportHand) {
+          // TWO-HAND AIMING: barrel points along line from trigger hand to support hand
+          const fwd = new THREE.Vector3().subVectors(supportHand.position, triggerHand.position).normalize();
+          const triggerUp = new THREE.Vector3(0, 1, 0).applyQuaternion(triggerHand.quaternion);
+          const right = new THREE.Vector3().crossVectors(fwd, triggerUp).normalize();
+          const up = new THREE.Vector3().crossVectors(right, fwd).normalize();
+
+          const basis = new THREE.Matrix4().makeBasis(right, up, fwd);
+          targetQuat.setFromRotationMatrix(basis);
+        } else {
+          // ONE-HAND AIMING
+          targetQuat.copy(triggerHand.quaternion);
+
+          // If it's a two-handed gun without support, add realistic droop & wobble
+          if (isTwoHandGun) {
+            const time = performance.now() * 0.001;
+            // Droop forward/down (~20 degrees)
+            const droopAngle = 0.36;
+            const wobblePitch = Math.sin(time * 2.3) * 0.07 + Math.cos(time * 3.8) * 0.03;
+            const wobbleYaw = Math.sin(time * 1.6) * 0.05 + Math.cos(time * 3.1) * 0.02;
+            const wobbleRoll = Math.sin(time * 2.7) * 0.035;
+
+            const extraRot = new THREE.Euler(droopAngle + wobblePitch, wobbleYaw, wobbleRoll);
+            const extraQuat = new THREE.Quaternion().setFromEuler(extraRot);
+            targetQuat.multiply(extraQuat);
+          }
+        }
       } else if (mouseControlData) {
         // Track Mouse fallback in 3D
         const targetZ = -0.85;
@@ -225,11 +363,49 @@ export class SceneManager {
         const yaw = 0.42 + (mouseControlData.angle || 0);
         const pitch = 0.05;
         targetQuat.setFromEuler(new THREE.Euler(pitch, yaw, 0));
+
+        this.isSupportAttached = mouseControlData.twoHands !== false;
+
+        // If two-handed weapon is unsupported in mouse mode, apply droop and wobble
+        if (isTwoHandGun && !this.isSupportAttached) {
+          const time = performance.now() * 0.001;
+          const droopAngle = 0.36;
+          const wobblePitch = Math.sin(time * 2.3) * 0.07 + Math.cos(time * 3.8) * 0.03;
+          const wobbleYaw = Math.sin(time * 1.6) * 0.05 + Math.cos(time * 3.1) * 0.02;
+          const wobbleRoll = Math.sin(time * 2.7) * 0.035;
+
+          const extraRot = new THREE.Euler(droopAngle + wobblePitch, wobbleYaw, wobbleRoll);
+          const extraQuat = new THREE.Quaternion().setFromEuler(extraRot);
+          targetQuat.multiply(extraQuat);
+        }
+      }
+
+      // 4. Per-Gun Weight & Inertia Simulation
+      // Lighter guns follow hand faster, heavier guns follow with inertia
+      const followSpeed = gun.followSpeed || 15.0;
+      const followAlpha = 1.0 - Math.exp(-followSpeed * dt);
+
+      if (this.currentFollowPos.lengthSq() < 0.001) {
+        this.currentFollowPos.copy(targetPos);
+        this.currentFollowQuat.copy(targetQuat);
+      } else {
+        this.currentFollowPos.lerp(targetPos, followAlpha);
+        this.currentFollowQuat.slerp(targetQuat, followAlpha);
       }
 
       // Blend smoothly between Stand and Hand
-      this.weaponRoot.position.lerpVectors(standPos, targetPos, this.heldLerp);
-      this.weaponRoot.quaternion.slerpQuaternions(standQuat, targetQuat, this.heldLerp);
+      this.weaponRoot.position.lerpVectors(standPos, this.currentFollowPos, this.heldLerp);
+      this.weaponRoot.quaternion.slerpQuaternions(standQuat, this.currentFollowQuat, this.heldLerp);
+
+      // Subtle idle breathing sway when held
+      if (this.heldLerp > 0.8) {
+        const time = performance.now() * 0.002;
+        const swayStrength = this.isSupportAttached ? 0.002 : 0.005;
+        const swayX = Math.sin(time * 0.8) * swayStrength;
+        const swayY = Math.cos(time * 1.2) * swayStrength;
+        this.weaponRoot.position.x += swayX;
+        this.weaponRoot.position.y += swayY;
+      }
     } else {
       // Resting on pedestal
       this.weaponRoot.position.lerpVectors(standPos, targetPos, this.heldLerp);
@@ -237,16 +413,57 @@ export class SceneManager {
       if (this.heldLerp < 0.01) {
         this.weaponRoot.position.copy(standPos);
         this.weaponRoot.quaternion.copy(standQuat);
+        this.currentFollowPos.copy(standPos);
+        this.currentFollowQuat.copy(standQuat);
       }
     }
 
-    // Subtle idle breathing sway when held
-    if (this.isGunHeld && this.heldLerp > 0.8) {
-      const time = performance.now() * 0.002;
-      const swayX = Math.sin(time * 0.8) * 0.004;
-      const swayY = Math.cos(time * 1.2) * 0.004;
-      this.weaponRoot.position.x += swayX;
-      this.weaponRoot.position.y += swayY;
+    // 5. Update Foregrip Ring Visuals
+    if (this.isGunHeld && this.heldLerp > 0.7 && (isTwoHandGun || isOptTwoHand)) {
+      this.supportRing.visible = true;
+      const time = performance.now() * 0.005;
+      if (this.isSupportAttached) {
+        // Locked support hand: vibrant cyan/green
+        this.supportRing.material.color.setHex(0x3df0a0);
+        this.supportRing.material.opacity = 0.85;
+        this.supportRing.scale.setScalar(1.0 + Math.sin(time * 3) * 0.04);
+      } else {
+        // Needs support: pulsing amber warning guide
+        this.supportRing.material.color.setHex(0xffaa33);
+        this.supportRing.material.opacity = 0.5 + Math.sin(time * 6) * 0.3;
+        this.supportRing.scale.setScalar(1.08 + Math.sin(time * 6) * 0.12);
+      }
+    } else {
+      this.supportRing.visible = false;
+    }
+
+    // 6. Update Aim Laser & Aim Dot
+    if (this.isGunHeld && this.heldLerp > 0.6) {
+      const muzzleNode = this.currentGunGroup
+        ? (this.currentGunGroup.getObjectByName('muzzle') || this.currentGunGroup.userData?.muzzle)
+        : null;
+      const muzzleWorld = new THREE.Vector3();
+      if (muzzleNode && typeof muzzleNode.getWorldPosition === 'function') {
+        muzzleNode.getWorldPosition(muzzleWorld);
+      } else {
+        muzzleWorld.copy(this.weaponRoot.position);
+      }
+
+      const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(this.weaponRoot.quaternion).normalize();
+      const laserDist = 4.5;
+      const endWorld = muzzleWorld.clone().addScaledVector(fwd, laserDist);
+
+      const posAttr = this.aimLaser.geometry.attributes.position;
+      posAttr.setXYZ(0, muzzleWorld.x, muzzleWorld.y, muzzleWorld.z);
+      posAttr.setXYZ(1, endWorld.x, endWorld.y, endWorld.z);
+      posAttr.needsUpdate = true;
+
+      this.aimDot.position.copy(endWorld);
+      this.aimLaser.visible = true;
+      this.aimDot.visible = true;
+    } else {
+      this.aimLaser.visible = false;
+      this.aimDot.visible = false;
     }
 
     // Calculate Weapon Inertia Velocity (for smoke trailing)
